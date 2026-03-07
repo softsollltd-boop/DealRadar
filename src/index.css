@@ -1,0 +1,87 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-heading: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  
+  --color-bg: var(--color-bg);
+  --color-ink: var(--color-ink);
+  --color-accent: var(--color-accent);
+  --color-accent-soft: var(--color-accent-soft);
+  --color-muted: var(--color-muted);
+  --color-line: var(--color-line);
+  --color-card: var(--color-card);
+  --color-input: var(--color-input);
+}
+
+/* Theme Colors */
+:root {
+  --color-bg: #F8FAFC;
+  --color-ink: #064E3B;
+  --color-accent: #FF5C00;
+  --color-accent-soft: rgba(16, 185, 129, 0.15);
+  --color-muted: #1e293b;
+  --color-line: rgba(16, 185, 129, 0.15);
+  --color-card: #FFFFFF;
+  --color-input: #FFFFFF;
+}
+
+@layer base {
+  body {
+    @apply bg-bg text-ink font-sans antialiased selection:bg-accent selection:text-white;
+    line-height: 1.6;
+  }
+
+  h1, h2, h3, h4 {
+    @apply font-bold text-ink;
+  }
+
+  p {
+    @apply text-muted;
+  }
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(18, 18, 18, 0.1);
+  border-radius: 10px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(18, 18, 18, 0.2);
+}
+
+.glass {
+  @apply bg-white border-b border-line;
+}
+
+.premium-card {
+  @apply bg-white border border-line rounded-xl transition-all duration-200 hover:shadow-md;
+}
+
+.input-premium {
+  @apply w-full bg-white border border-line rounded-lg px-4 py-3 text-sm outline-none focus:border-accent transition-all placeholder:text-muted/40 text-ink;
+}
+
+.btn-primary {
+  @apply bg-accent text-white px-6 py-3 rounded-lg font-medium transition-all hover:bg-accent/90 active:scale-[0.98] disabled:opacity-50;
+}
+
+.btn-secondary {
+  @apply bg-white border border-line text-ink px-6 py-3 rounded-lg font-medium transition-all hover:bg-gray-50 active:scale-[0.98] disabled:opacity-50;
+}
+
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
+
