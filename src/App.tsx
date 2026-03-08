@@ -488,7 +488,7 @@ export default function App() {
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
             <motion.div key="dashboard" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-12">
-              <Radar />
+              <Radar leads={leads} />
               <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-8">
                 <div>
                   <h2 className="text-3xl font-bold">Lead Pipeline</h2>
