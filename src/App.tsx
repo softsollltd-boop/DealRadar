@@ -9,7 +9,7 @@ import {
 import { motion, AnimatePresence } from 'motion/react';
 import { BusinessProfile, IntentTrigger, AgentLead, AppConfig, Integrations, Campaign, GhostwriterDraft, Dossier } from './types';
 import { analyzeBusiness, huntLeads, findEmail, generateDraft, generateDossier } from './services/gemini';
-import { Radar } from './components/Radar';
+import { HuntingRadar } from './components/HuntingRadar';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<'dashboard' | 'business' | 'triggers' | 'settings'>('dashboard');
@@ -26,6 +26,7 @@ export default function App() {
   const [selectedLeadForDraft, setSelectedLeadForDraft] = useState<AgentLead | null>(null);
   const [isGeneratingDraft, setIsGeneratingDraft] = useState(false);
   const [currentDraft, setCurrentDraft] = useState<GhostwriterDraft | null>(null);
+  const [generatedDrafts, setGeneratedDrafts] = useState<Record<string, GhostwriterDraft>>({});
   const [showDraftModal, setShowDraftModal] = useState(false);
   const [selectedLeadForDossier, setSelectedLeadForDossier] = useState<AgentLead | null>(null);
   const [isGeneratingDossier, setIsGeneratingDossier] = useState(false);
@@ -89,6 +90,7 @@ export default function App() {
       
       const result = await generateDraft(lead, biz);
       setCurrentDraft(result);
+      setGeneratedDrafts(prev => ({ ...prev, [lead.id]: result }));
       setShowDraftModal(true);
     } catch (e) {
       console.error(e);
@@ -406,23 +408,23 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-screen bg-bg selection:bg-accent/20">
+    <div className="min-h-screen bg-bg selection:bg-accent/20 bg-grid">
       {/* Navigation */}
       <nav className="sticky top-0 z-50 glass px-6 py-4 transition-all duration-500">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
           <div className="flex items-center gap-4 group cursor-pointer" onClick={() => setActiveTab('dashboard')}>
-            <div className="w-12 h-12 bg-accent rounded-2xl flex items-center justify-center transition-transform duration-500 group-hover:rotate-12">
+            <div className="w-12 h-12 bg-gradient-to-br from-accent to-accent-secondary rounded-2xl flex items-center justify-center transition-transform duration-500 group-hover:rotate-12 shadow-xl shadow-accent/20">
               <Rocket className="text-white w-6 h-6" />
             </div>
             <div>
-              <h1 className="text-lg font-bold">DealRadar</h1>
-              <p className="text-xs text-ink/70 mt-0.5">Real-Time Intent Intelligence</p>
+              <h1 className="text-2xl font-display font-black tracking-tighter text-gradient">DEALRADAR</h1>
+              <p className="text-[10px] font-bold tracking-[0.2em] text-accent uppercase">Neural Logistics Architecture</p>
             </div>
           </div>
           
           {/* Desktop Nav */}
-          <div className="hidden md:flex items-center gap-1 bg-input p-1.5 rounded-[20px]">
-            <NavButton active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<Briefcase className="w-4 h-4" />} label="Dashboard" />
+          <div className="hidden md:flex items-center gap-1 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
+            <NavButton active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<Briefcase className="w-4 h-4" />} label="Pipeline" />
             <NavButton active={activeTab === 'business'} onClick={() => setActiveTab('business')} icon={<Globe className="w-4 h-4" />} label="Strategy" />
             <NavButton active={activeTab === 'triggers'} onClick={() => setActiveTab('triggers')} icon={<Target className="w-4 h-4" />} label="Intents" />
             <NavButton active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon={<Settings className="w-4 h-4" />} label="Engine" />
@@ -431,7 +433,7 @@ export default function App() {
           {/* Mobile Menu Toggle */}
           <button 
             onClick={() => setIsMobileMenuOpen(!isMobileMenuOpen)}
-            className="md:hidden p-2 hover:bg-black/5 rounded-xl transition-colors"
+            className="md:hidden p-2 hover:bg-slate-100 rounded-xl transition-colors"
           >
             {isMobileMenuOpen ? <X className="w-6 h-6" /> : <Menu className="w-6 h-6" />}
           </button>
@@ -444,7 +446,7 @@ export default function App() {
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: 'auto' }}
               exit={{ opacity: 0, height: 0 }}
-              className="md:hidden overflow-hidden bg-white border-t border-black/5"
+              className="md:hidden overflow-hidden bg-white border-t border-slate-100"
             >
               <div className="flex flex-col p-4 gap-2">
                 <MobileNavButton 
@@ -479,7 +481,7 @@ export default function App() {
 
       <main className="max-w-7xl mx-auto px-4 md:px-6 py-8 md:py-12">
         {error && (
-          <div className="mb-8 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 text-red-600 animate-in fade-in slide-in-from-top-4">
+          <div className="mb-8 p-4 bg-red-50 border border-red-100 rounded-2xl flex items-center gap-3 text-red-600 animate-fade-in">
             <AlertCircle className="w-5 h-5 flex-shrink-0" />
             <p className="text-sm font-medium">{error}</p>
           </div>
@@ -487,71 +489,93 @@ export default function App() {
 
         <AnimatePresence mode="wait">
           {activeTab === 'dashboard' && (
-            <motion.div key="dashboard" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-12">
-              <Radar leads={leads} />
-              <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-8">
+            <motion.div 
+              key="dashboard" 
+              initial={{ opacity: 0, y: 20 }} 
+              animate={{ opacity: 1, y: 0 }} 
+              exit={{ opacity: 0, y: -20 }} 
+              className="space-y-12"
+            >
+              <AnimatePresence>
+                {isHunting && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: 'auto' }}
+                    exit={{ opacity: 0, height: 0 }}
+                    className="overflow-hidden"
+                  >
+                    <HuntingRadar />
+                  </motion.div>
+                )}
+              </AnimatePresence>
+              
+              <div className="flex flex-col lg:flex-row lg:items-end justify-between gap-8">
                 <div>
-                  <h2 className="text-3xl font-bold">Lead Pipeline</h2>
-                  <p className="text-muted mt-2 text-sm max-w-md">Curated high-intent opportunities identified by your autonomous agents.</p>
+                  <h2 className="text-5xl font-display font-black tracking-tight text-ink">Intelligence Pipeline</h2>
+                  <p className="text-muted mt-3 text-lg max-w-xl leading-relaxed">
+                    Autonomous agents are currently monitoring <span className="text-accent font-bold">{leads.length}</span> high-intent opportunities across your target markets.
+                  </p>
                 </div>
                 <div className="flex flex-wrap gap-3">
-                  <button onClick={handleDownloadCSV} className="flex-1 sm:flex-none px-4 py-2 hover:bg-ink/5 rounded-xl transition-all text-ink/80 border border-line flex items-center justify-center gap-2 text-xs font-medium">
+                  <button onClick={handleDownloadCSV} className="btn-secondary !px-5 !py-2.5 !text-sm">
                     <Download className="w-4 h-4" />
-                    Export
+                    Export CSV
                   </button>
-                  <button onClick={fetchInitialData} className="p-3 hover:bg-ink/5 rounded-2xl transition-all text-ink/80 border border-line flex items-center justify-center">
+                  <button onClick={fetchInitialData} className="p-3 hover:bg-white rounded-xl transition-all text-ink border border-line bg-white/50">
                     <RefreshCw className="w-5 h-5" />
                   </button>
-                  <button onClick={() => setActiveTab('triggers')} className="flex-1 sm:flex-none btn-primary flex items-center justify-center gap-2 text-sm">
-                    <Zap className="w-4 h-4" />
-                    Hunt Leads
+                  <button onClick={() => setActiveTab('triggers')} className="btn-primary !px-6 !py-3">
+                    <Zap className="w-4 h-4 fill-current" />
+                    Launch Hunter
                   </button>
                 </div>
               </div>
 
-              <div className="flex flex-col lg:flex-row gap-6 items-stretch lg:items-center justify-between">
-                <div className="relative w-full lg:w-[480px]">
-                  <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-4 h-4 text-ink/50" />
+              <div className="flex flex-col lg:flex-row gap-6 items-stretch lg:items-center justify-between bg-white/40 backdrop-blur-md p-6 rounded-[2rem] border border-line shadow-sm">
+                <div className="relative w-full lg:w-[540px]">
+                  <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                   <input 
                     type="text" 
-                    placeholder="Search leads, companies, or titles..." 
+                    placeholder="Search by name, company, or role..." 
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     className="input-premium pl-14"
                   />
                 </div>
 
-                <div className="flex items-center gap-4">
-                  <span className="text-xs font-medium text-ink/60">Sort By</span>
-                  <select 
-                    value={sortBy}
-                    onChange={(e) => setSortBy(e.target.value as any)}
-                    className="bg-transparent border-b border-line px-2 py-1 text-xs outline-none cursor-pointer hover:border-ink transition-all"
-                  >
-                    <option value="priority">Priority Score</option>
-                    <option value="score">AI Fit Score</option>
-                    <option value="date">Date Added</option>
-                  </select>
+                <div className="flex items-center gap-6">
+                  <div className="flex items-center gap-3">
+                    <span className="text-xs font-bold uppercase tracking-widest text-slate-400">Sort</span>
+                    <select 
+                      value={sortBy}
+                      onChange={(e) => setSortBy(e.target.value as any)}
+                      className="bg-transparent font-bold text-sm outline-none cursor-pointer hover:text-accent transition-all text-slate-700"
+                    >
+                      <option value="priority">Priority Score</option>
+                      <option value="score">AI Fit Score</option>
+                      <option value="date">Date Added</option>
+                    </select>
+                  </div>
+                  <div className="h-8 w-px bg-slate-200 hidden lg:block" />
+                  <div className="flex items-center gap-2 overflow-x-auto scrollbar-hide">
+                    {(['all', 'new', 'contacted', 'replied', 'booked', 'rejected'] as const).map((status) => (
+                      <button
+                        key={status}
+                        onClick={() => setFilterStatus(status)}
+                        className={`px-4 py-2 rounded-xl text-xs font-bold transition-all whitespace-nowrap ${
+                          filterStatus === status 
+                            ? 'bg-accent text-white shadow-lg shadow-accent/20' 
+                            : 'text-slate-400 hover:bg-slate-100'
+                        }`}
+                      >
+                        {status.toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
                 </div>
               </div>
 
-              <div className="flex items-center gap-2 overflow-x-auto pb-4 scrollbar-hide">
-                {(['all', 'new', 'contacted', 'replied', 'booked', 'rejected'] as const).map((status) => (
-                  <button
-                    key={status}
-                    onClick={() => setFilterStatus(status)}
-                    className={`px-4 py-2 rounded-full text-xs transition-all whitespace-nowrap ${
-                      filterStatus === status 
-                        ? 'bg-accent text-white shadow-lg shadow-accent/20' 
-                        : 'bg-ink/5 text-ink/70 hover:bg-ink/10'
-                    }`}
-                  >
-                    {status} <span className="ml-1 opacity-60">{status === 'all' ? leads.length : leads.filter(l => l.status === status).length}</span>
-                  </button>
-                ))}
-              </div>
-
-              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
                 {leads
                   .filter(l => {
                     const matchesStatus = filterStatus === 'all' || l.status === filterStatus;
@@ -589,15 +613,20 @@ export default function App() {
                         isGeneratingDraft={isGeneratingDraft && selectedLeadForDraft?.id === lead.id}
                         onGenerateDossier={() => handleGenerateDossier(lead)}
                         isGeneratingDossier={isGeneratingDossier && selectedLeadForDossier?.id === lead.id}
+                        hasDraft={!!generatedDrafts[lead.id]}
+                        onViewDraft={() => {
+                          setCurrentDraft(generatedDrafts[lead.id]);
+                          setShowDraftModal(true);
+                        }}
                       />
                     ))
                 ) : (
-                  <div className="col-span-full py-32 text-center bg-bg rounded-[40px] border border-dashed border-black/10">
-                    <div className="w-16 h-16 bg-black/5 rounded-full flex items-center justify-center mx-auto mb-4">
-                      <Search className="text-ink/20 w-8 h-8" />
+                  <div className="col-span-full py-32 text-center bg-slate-50 rounded-[40px] border border-dashed border-slate-200">
+                    <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
+                      <Search className="text-slate-300 w-8 h-8" />
                     </div>
-                    <h3 className="text-lg font-medium text-ink/80">No leads found yet</h3>
-                    <p className="text-ink/70 max-w-xs mx-auto mt-2">Go to the Intents tab to start Agent 2 hunting for your business.</p>
+                    <h3 className="text-lg font-medium text-slate-900">No leads found yet</h3>
+                    <p className="text-slate-500 max-w-xs mx-auto mt-2">Go to the Intents tab to start Agent 2 hunting for your business.</p>
                   </div>
                 )}
               </div>
@@ -607,11 +636,11 @@ export default function App() {
           {activeTab === 'business' && (
             <motion.div key="business" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-2xl mx-auto">
               <div className="text-center mb-12">
-                <h2 className="text-3xl font-bold mb-3">Business Intelligence</h2>
+                <h2 className="text-4xl font-display font-black mb-3 text-gradient">Business Intelligence</h2>
                 <p className="text-muted">Agent 1 requires a deep understanding of your value proposition to identify high-conversion intent triggers.</p>
               </div>
 
-              <form onSubmit={handleSaveBusiness} className="premium-card p-10 space-y-8">
+              <form onSubmit={handleSaveBusiness} className="glass-card p-10 space-y-8">
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                   <Input label="Company Name" name="company_name" defaultValue={business?.companyName} placeholder="Your Company Name" icon={<Briefcase className="w-4 h-4" />} />
                   <Input label="Industry" name="industry" defaultValue={business?.industry} placeholder="e.g. SaaS, Fintech" icon={<Target className="w-4 h-4" />} />
@@ -646,13 +675,13 @@ export default function App() {
             <motion.div key="triggers" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="space-y-12">
               <div className="flex items-end justify-between">
                 <div>
-                  <h2 className="text-3xl font-bold">Intent Triggers</h2>
+                  <h2 className="text-4xl font-display font-black text-gradient">Intent Triggers</h2>
                   <p className="text-muted mt-2 max-w-md">Agent 1's strategic framework for identifying high-value outreach opportunities.</p>
                 </div>
                 <button 
                   onClick={handleAnalyzeBusiness}
                   disabled={isAnalyzing}
-                  className="px-4 py-2 bg-ink/5 text-ink/60 rounded-xl text-xs hover:bg-ink/10 transition-all flex items-center gap-2"
+                  className="px-4 py-2 bg-accent/5 text-accent rounded-xl text-xs hover:bg-accent/10 transition-all flex items-center gap-2 font-bold"
                 >
                   {isAnalyzing ? <Loader2 className="w-3 h-3 animate-spin" /> : <RefreshCw className="w-3 h-3" />}
                   Refresh Strategy
@@ -662,28 +691,28 @@ export default function App() {
               <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
                 {triggers.length > 0 ? (
                   triggers.map((trigger) => (
-                    <div key={trigger.id} className="premium-card p-10 flex flex-col group">
+                    <div key={trigger.id} className="glass-card p-10 flex flex-col group">
                       <div className="flex justify-between items-start mb-8">
                         <div className="flex items-center gap-4">
-                          <div className="w-14 h-14 bg-ink/5 rounded-[20px] flex items-center justify-center text-ink/50 group-hover:text-ink transition-colors duration-500 relative">
+                          <div className="w-14 h-14 bg-white/50 rounded-[20px] flex items-center justify-center text-slate-400 group-hover:text-accent transition-colors duration-500 relative border border-line">
                             <Target className="w-6 h-6" />
                             {trigger.rank && (
-                              <div className="absolute -top-2 -right-2 w-6 h-6 bg-ink text-bg rounded-full flex items-center justify-center text-xs font-bold border-2 border-bg">
+                              <div className="absolute -top-2 -right-2 w-6 h-6 bg-accent text-white rounded-full flex items-center justify-center text-xs font-bold border-2 border-white">
                                 {trigger.rank}
                               </div>
                             )}
                           </div>
                           {trigger.priority && (
-                            <div className={`px-3 py-1 rounded-full text-xs whitespace-nowrap ${
+                            <div className={`px-3 py-1 rounded-full text-xs whitespace-nowrap font-bold ${
                               trigger.priority === 'High' ? 'bg-rose-50 text-rose-500 border border-rose-100' :
                               trigger.priority === 'Medium' ? 'bg-orange-50 text-orange-500 border border-orange-100' :
-                              'bg-accent-soft text-accent border border-accent/10'
+                              'bg-emerald-50 text-emerald-600 border border-emerald-100'
                             }`}>
                               {trigger.priority} Priority
                             </div>
                           )}
                           {trigger.maxAgeDays && (
-                            <div className="px-3 py-1 rounded-full text-xs bg-ink/5 text-ink/70 border border-line whitespace-nowrap">
+                            <div className="px-3 py-1 rounded-full text-xs bg-slate-50 text-slate-500 border border-slate-100 whitespace-nowrap font-medium">
                               {trigger.maxAgeDays}D Shelf Life
                             </div>
                           )}
@@ -697,29 +726,29 @@ export default function App() {
                           Hunt Leads
                         </button>
                       </div>
-                      <h3 className="text-xl font-bold mb-3">{trigger.title}</h3>
-                      <p className="text-ink/80 text-sm mb-6 flex-grow">{trigger.description}</p>
+                      <h3 className="text-2xl font-display font-bold mb-3 text-ink">{trigger.title}</h3>
+                      <p className="text-muted text-sm mb-6 flex-grow">{trigger.description}</p>
                       
                       <div className="space-y-4">
-                        <div className="p-4 bg-bg border border-line rounded-xl">
-                          <p className="text-xs font-bold text-ink/60 mb-2">Agent Reasoning</p>
-                          <p className="text-xs text-ink/90 italic">"{trigger.reasoning}"</p>
+                        <div className="p-4 bg-emerald-50/30 border border-emerald-100/50 rounded-xl">
+                          <p className="text-xs font-bold text-emerald-700/60 mb-2 uppercase tracking-wider">Agent Reasoning</p>
+                          <p className="text-xs text-emerald-900 italic">"{trigger.reasoning}"</p>
                         </div>
                         <div className="flex flex-wrap gap-2">
                           {trigger.keywords.map((kw, i) => (
-                            <span key={i} className="px-3 py-1 bg-ink/5 rounded-full text-xs text-ink/70">#{kw}</span>
+                            <span key={i} className="px-3 py-1 bg-white border border-line rounded-full text-xs text-slate-500 font-medium">#{kw}</span>
                           ))}
                         </div>
                       </div>
                     </div>
                   ))
                 ) : (
-                  <div className="col-span-full py-40 text-center premium-card border-dashed">
-                    <div className="w-20 h-20 bg-ink/5 rounded-full flex items-center justify-center mx-auto mb-6">
-                      <Brain className="text-ink/10 w-10 h-10" />
+                  <div className="col-span-full py-40 text-center glass-card border-dashed">
+                    <div className="w-20 h-20 bg-white rounded-full flex items-center justify-center mx-auto mb-6 shadow-sm border border-line">
+                      <Brain className="text-slate-200 w-10 h-10" />
                     </div>
-                    <h3 className="text-2xl font-heading font-bold text-ink/80">Strategic Void</h3>
-                    <p className="text-ink/70 max-w-xs mx-auto mt-3 leading-relaxed">Agent 1 requires your business profile to architect a high-intent hunting strategy.</p>
+                    <h3 className="text-3xl font-display font-bold text-ink">Strategic Void</h3>
+                    <p className="text-muted max-w-xs mx-auto mt-3 leading-relaxed">Agent 1 requires your business profile to architect a high-intent hunting strategy.</p>
                     <button 
                       onClick={handleAnalyzeBusiness}
                       disabled={isAnalyzing}
@@ -737,16 +766,16 @@ export default function App() {
           {activeTab === 'settings' && (
             <motion.div key="settings" initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }} className="max-w-5xl mx-auto space-y-12">
               <div className="text-center mb-12">
-                <h2 className="text-3xl font-bold mb-3">Engine Configuration</h2>
+                <h2 className="text-4xl font-display font-black mb-3 text-gradient">Engine Configuration</h2>
                 <p className="text-muted">Fine-tune the autonomous agents and manage your delivery infrastructure.</p>
               </div>
 
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
                 {/* Core Config */}
                 <div className="space-y-12">
-                  <form onSubmit={handleSaveConfig} className="premium-card p-10 space-y-10">
-                    <h3 className="text-xl font-heading font-bold flex items-center gap-3">
-                      <Brain className="w-5 h-5 text-accent" />
+                  <form onSubmit={handleSaveConfig} className="glass-card p-10 space-y-10">
+                    <h3 className="text-2xl font-display font-bold flex items-center gap-3 text-ink">
+                      <Brain className="w-6 h-6 text-accent" />
                       AI Intelligence
                     </h3>
                     
@@ -771,21 +800,21 @@ export default function App() {
                 </div>
 
                 {/* Integrations */}
-                <form onSubmit={handleSaveIntegrations} className="premium-card p-10 space-y-10">
-                  <h3 className="text-xl font-heading font-bold flex items-center gap-3">
-                    <Zap className="w-5 h-5 text-accent" />
+                <form onSubmit={handleSaveIntegrations} className="glass-card p-10 space-y-10">
+                  <h3 className="text-2xl font-display font-bold flex items-center gap-3 text-ink">
+                    <Zap className="w-6 h-6 text-accent" />
                     Delivery Systems
                   </h3>
                   
                   <div className="space-y-8">
-                    <div className="p-8 bg-bg border border-line rounded-[24px] space-y-6">
+                    <div className="p-8 bg-white/50 border border-line rounded-[2rem] space-y-6">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 bg-accent rounded-2xl flex items-center justify-center text-white shadow-2xl shadow-accent/20">
                           <Rocket className="w-5 h-5" />
                         </div>
                         <div>
-                          <h4 className="font-bold text-sm">Smartlead.ai</h4>
-                          <p className="text-xs text-ink/70 font-medium mt-0.5">Infrastructure</p>
+                          <h4 className="font-display font-bold text-lg text-ink">Smartlead.ai</h4>
+                          <p className="text-xs text-accent font-bold mt-0.5 uppercase tracking-widest">Infrastructure</p>
                         </div>
                       </div>
                       <Input 
@@ -797,14 +826,14 @@ export default function App() {
                       />
                     </div>
 
-                    <div className="p-8 bg-bg border border-line rounded-[24px] space-y-6">
+                    <div className="p-8 bg-white/50 border border-line rounded-[2rem] space-y-6">
                       <div className="flex items-center gap-4">
-                        <div className="w-12 h-12 bg-orange-500 rounded-2xl flex items-center justify-center text-white shadow-2xl shadow-orange-500/20">
+                        <div className="w-12 h-12 bg-accent-secondary rounded-2xl flex items-center justify-center text-white shadow-2xl shadow-accent-secondary/20">
                           <Zap className="w-5 h-5" />
                         </div>
                         <div>
-                          <h4 className="font-bold text-sm">Instantly.ai</h4>
-                          <p className="text-xs text-ink/30 font-bold mt-1">Infrastructure</p>
+                          <h4 className="font-display font-bold text-lg text-ink">Instantly.ai</h4>
+                          <p className="text-xs text-accent-secondary font-bold mt-1 uppercase tracking-widest">Infrastructure</p>
                         </div>
                       </div>
                       <Input 
@@ -816,14 +845,14 @@ export default function App() {
                       />
                     </div>
 
-                    <div className="p-8 bg-bg border border-line rounded-[24px] space-y-6">
+                    <div className="p-8 bg-white/50 border border-line rounded-[2rem] space-y-6">
                       <div className="flex items-center gap-4">
                         <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center text-white shadow-2xl shadow-emerald-500/20">
                           <Search className="w-5 h-5" />
                         </div>
                         <div>
-                          <h4 className="font-bold text-sm">Hunter.io</h4>
-                          <p className="text-xs text-ink/30 font-bold mt-1">Intelligence</p>
+                          <h4 className="font-display font-bold text-lg text-ink">Hunter.io</h4>
+                          <p className="text-xs text-emerald-600 font-bold mt-1 uppercase tracking-widest">Intelligence</p>
                         </div>
                       </div>
                       <Input 
@@ -849,24 +878,24 @@ export default function App() {
       {/* Global Ghostwriter Modal */}
       <AnimatePresence>
         {showDraftModal && currentDraft && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6 bg-black/40 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6 bg-ink/20 backdrop-blur-md">
             <motion.div 
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-white w-full max-w-4xl max-h-[90vh] rounded-[32px] shadow-2xl overflow-hidden flex flex-col"
+              className="bg-white w-full max-w-4xl max-h-[90vh] rounded-[3rem] shadow-2xl border border-line overflow-hidden flex flex-col"
             >
-              <div className="p-8 border-b border-line flex items-center justify-between bg-bg">
+              <div className="p-8 border-b border-line flex items-center justify-between bg-bg/50">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-accent rounded-2xl flex items-center justify-center text-white">
+                  <div className="w-12 h-12 bg-gradient-to-br from-accent to-accent-secondary rounded-2xl flex items-center justify-center text-white">
                     <Brain className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold">Agent 3: Ghostwriter</h3>
-                    <p className="text-xs font-medium text-ink/70 mt-1">Context-Aware Outreach Engine</p>
+                    <h3 className="text-2xl font-display font-bold text-gradient">Agent 3: Ghostwriter</h3>
+                    <p className="text-xs font-bold text-accent mt-1 uppercase tracking-widest">Context-Aware Outreach Engine</p>
                   </div>
                 </div>
-                <button onClick={() => setShowDraftModal(false)} className="p-2 hover:bg-black/5 rounded-xl transition-colors">
+                <button onClick={() => setShowDraftModal(false)} className="p-2 hover:bg-accent/10 rounded-xl transition-colors text-accent">
                   <X className="w-6 h-6" />
                 </button>
               </div>
@@ -875,7 +904,7 @@ export default function App() {
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
                   {/* Prospect Perspective Sidebar */}
                   <div className="lg:col-span-1 space-y-8">
-                    <div className="p-6 bg-accent/5 rounded-xl border border-accent/10">
+                    <div className="p-6 bg-accent/5 rounded-xl border border-accent/20">
                       <p className="text-xs font-bold text-accent mb-3 flex items-center gap-2">
                         <User className="w-3 h-3" /> Prospect Mindset
                       </p>
@@ -915,34 +944,55 @@ export default function App() {
                     <p className="text-xs font-bold text-ink/70">Generated Variations</p>
                     <div className="space-y-6">
                       {currentDraft.drafts.map((d, i) => (
-                        <div key={i} className="group relative p-6 bg-bg border border-line rounded-xl hover:border-accent/30 transition-all">
+                        <div key={i} className="group relative p-6 bg-white border border-slate-100 rounded-xl hover:border-accent/30 transition-all shadow-sm">
                           <div className="flex items-center justify-between mb-4">
-                            <span className={`px-3 py-1 rounded-full text-xs font-medium ${
-                              d.type === 'Professional' ? 'bg-accent-soft text-accent' :
-                              d.type === 'Conversational' ? 'bg-emerald-50 text-emerald-600' :
-                              'bg-orange-50 text-orange-600'
-                            }`}>
-                              {d.type} Draft
-                            </span>
-                            <button 
-                              onClick={() => {
-                                navigator.clipboard.writeText(`Subject: ${d.subject}\n\n${d.body}`);
-                                alert("Draft copied to clipboard!");
-                              }}
-                              className="text-xs font-medium text-ink/70 hover:text-accent transition-colors flex items-center gap-2"
-                            >
-                              <Download className="w-3 h-3" /> Copy Draft
-                            </button>
+                            <div className="flex items-center gap-3">
+                              <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest ${
+                                d.type === 'Professional' ? 'bg-accent-soft text-accent' :
+                                d.type === 'Conversational' ? 'bg-emerald-50 text-emerald-600' :
+                                'bg-orange-50 text-orange-600'
+                              }`}>
+                                {d.type}
+                              </span>
+                              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Variation {i + 1}</span>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              <button 
+                                onClick={() => {
+                                  navigator.clipboard.writeText(`Subject: ${d.subject}\n\n${d.body}`);
+                                  alert("Draft copied to clipboard!");
+                                }}
+                                className="p-2 hover:bg-accent/10 text-slate-400 hover:text-accent rounded-lg transition-all"
+                                title="Copy to Clipboard"
+                              >
+                                <Download className="w-4 h-4" />
+                              </button>
+                            </div>
                           </div>
                           <div className="space-y-4">
                             <div>
-                              <p className="text-xs font-bold text-ink/60 mb-1">Subject</p>
-                              <p className="text-sm font-bold text-ink">{d.subject}</p>
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Subject Line</p>
+                              <p className="text-sm font-bold text-slate-900">{d.subject}</p>
                             </div>
                             <div>
-                              <p className="text-xs font-bold text-ink/60 mb-1">Body</p>
-                              <p className="text-sm text-ink/90 leading-relaxed whitespace-pre-wrap">{d.body}</p>
+                              <p className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Message Body</p>
+                              <p className="text-sm text-slate-700 leading-relaxed whitespace-pre-wrap">{d.body}</p>
                             </div>
+                          </div>
+                          
+                          <div className="mt-6 pt-6 border-t border-slate-100 flex justify-end">
+                            <button 
+                              onClick={() => {
+                                // Close modal and trigger push menu on the lead card
+                                setShowDraftModal(false);
+                                setActiveTab('dashboard');
+                                // We'll need to scroll to the lead or just show a success message
+                                alert("Draft selected. Use the 'Deploy' button on the lead card to send this to your campaign.");
+                              }}
+                              className="btn-primary !py-2.5 !px-5 !text-[10px] !rounded-lg"
+                            >
+                              Select This Variation
+                            </button>
                           </div>
                         </div>
                       ))}
@@ -951,8 +1001,8 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="p-8 border-t border-line bg-bg flex items-center justify-between">
-                <p className="text-xs text-ink/70 italic">Drafts are automatically modulated based on the prospect's seniority and context.</p>
+              <div className="p-8 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+                <p className="text-xs text-slate-500 italic">Drafts are automatically modulated based on the prospect's seniority and context.</p>
                 <button 
                   onClick={() => setShowDraftModal(false)}
                   className="btn-secondary !py-3 !px-8"
@@ -968,24 +1018,24 @@ export default function App() {
       {/* Deep Research Dossier Modal */}
       <AnimatePresence>
         {showDossierModal && currentDossier && (
-          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6 bg-black/40 backdrop-blur-sm">
+          <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-6 bg-ink/20 backdrop-blur-md">
             <motion.div 
               initial={{ opacity: 0, scale: 0.9, y: 20 }}
               animate={{ opacity: 1, scale: 1, y: 0 }}
               exit={{ opacity: 0, scale: 0.9, y: 20 }}
-              className="bg-white w-full max-w-5xl max-h-[90vh] rounded-[32px] shadow-2xl overflow-hidden flex flex-col"
+              className="bg-white w-full max-w-5xl max-h-[90vh] rounded-[3rem] shadow-2xl border border-line overflow-hidden flex flex-col"
             >
-              <div className="p-8 border-b border-line flex items-center justify-between bg-bg">
+              <div className="p-8 border-b border-line flex items-center justify-between bg-bg/50">
                 <div className="flex items-center gap-4">
-                  <div className="w-12 h-12 bg-accent rounded-2xl flex items-center justify-center text-white">
+                  <div className="w-12 h-12 bg-emerald-500 rounded-2xl flex items-center justify-center text-white">
                     <Search className="w-6 h-6" />
                   </div>
                   <div>
-                    <h3 className="text-xl font-bold">Deep Research Dossier</h3>
-                    <p className="text-xs font-medium text-ink/70 mt-1">{currentDossier.companyName} • Updated {new Date(currentDossier.updatedAt).toLocaleDateString()}</p>
+                    <h3 className="text-2xl font-display font-bold text-gradient">Deep Research Dossier</h3>
+                    <p className="text-xs font-bold text-emerald-600 mt-1 uppercase tracking-widest">{currentDossier.companyName} • Updated {new Date(currentDossier.updatedAt).toLocaleDateString()}</p>
                   </div>
                 </div>
-                <button onClick={() => setShowDossierModal(false)} className="p-2 hover:bg-black/5 rounded-xl transition-colors">
+                <button onClick={() => setShowDossierModal(false)} className="p-2 hover:bg-emerald-50 rounded-xl transition-colors text-emerald-500">
                   <X className="w-6 h-6" />
                 </button>
               </div>
@@ -1062,15 +1112,15 @@ export default function App() {
                       <p className="text-xs font-bold text-ink/70 mb-6">Recent News & Events</p>
                       <div className="space-y-6">
                         {currentDossier.recentNews.map((news, i) => (
-                          <div key={i} className="p-6 bg-bg border border-line rounded-xl hover:border-accent/30 transition-all">
+                          <div key={i} className="p-6 bg-slate-50 border border-slate-100 rounded-xl hover:border-accent/30 transition-all">
                             <div className="flex items-center justify-between mb-3">
-                              <span className="text-xs font-bold text-ink/60">{news.date}</span>
+                              <span className="text-xs font-bold text-slate-400">{news.date}</span>
                               <a href={news.url} target="_blank" rel="noreferrer" className="text-accent hover:underline text-xs font-bold flex items-center gap-1">
                                 Source <ExternalLink className="w-3 h-3" />
                               </a>
                             </div>
-                            <h4 className="text-base font-bold text-ink mb-2">{news.title}</h4>
-                            <p className="text-sm text-ink/80 leading-relaxed">{news.impact}</p>
+                            <h4 className="text-base font-bold text-slate-900 mb-2">{news.title}</h4>
+                            <p className="text-sm text-slate-600 leading-relaxed">{news.impact}</p>
                           </div>
                         ))}
                       </div>
@@ -1094,8 +1144,8 @@ export default function App() {
                 </div>
               </div>
 
-              <div className="p-8 border-t border-line bg-bg flex items-center justify-between">
-                <p className="text-xs text-ink/70 italic">Deep Research Dossiers are generated using real-time market intelligence and search grounding.</p>
+              <div className="p-8 border-t border-slate-100 bg-slate-50 flex items-center justify-between">
+                <p className="text-xs text-slate-500 italic">Deep Research Dossiers are generated using real-time market intelligence and search grounding.</p>
                 <button 
                   onClick={() => setShowDossierModal(false)}
                   className="btn-secondary !py-3 !px-8"
@@ -1115,9 +1165,9 @@ function NavButton({ active, onClick, icon, label }: { active: boolean, onClick:
   return (
     <button 
       onClick={onClick}
-      className={`flex items-center gap-2 px-4 py-2 rounded-lg text-xs font-semibold transition-all duration-200 ${active ? 'bg-white shadow-sm text-accent' : 'text-ink/70 hover:text-ink hover:bg-white/50'}`}
+      className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all duration-300 ${active ? 'bg-white shadow-md text-accent border border-slate-100' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
     >
-      {React.cloneElement(icon as React.ReactElement, { className: `w-3.5 h-3.5 ${active ? 'text-accent' : 'text-ink/60'}` })}
+      {React.cloneElement(icon as React.ReactElement, { className: `w-3.5 h-3.5 ${active ? 'text-accent' : 'text-slate-400'}` })}
       {label}
     </button>
   );
@@ -1127,7 +1177,7 @@ function MobileNavButton({ active, onClick, icon, label }: { active: boolean, on
   return (
     <button 
       onClick={onClick}
-      className={`flex items-center gap-4 px-6 py-4 rounded-xl text-base font-medium transition-all ${active ? 'bg-accent text-white shadow-lg shadow-accent/20' : 'text-ink/60 hover:bg-ink/5'}`}
+      className={`flex items-center gap-4 px-6 py-4 rounded-xl text-base font-medium transition-all ${active ? 'bg-accent text-white shadow-lg shadow-accent/20' : 'text-slate-600 hover:bg-slate-50'}`}
     >
       {icon}
       {label}
@@ -1137,10 +1187,10 @@ function MobileNavButton({ active, onClick, icon, label }: { active: boolean, on
 
 function Input({ label, name, placeholder, icon, defaultValue }: { label: string, name: string, placeholder: string, icon: React.ReactNode, defaultValue?: string }) {
   return (
-    <div className="space-y-1.5">
-      <label className="block text-xs font-semibold text-ink/70 ml-1">{label}</label>
+    <div className="space-y-2">
+      <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">{label}</label>
       <div className="relative">
-        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-ink/50">{icon}</div>
+        <div className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-300">{icon}</div>
         <input 
           name={name}
           defaultValue={defaultValue}
@@ -1154,8 +1204,8 @@ function Input({ label, name, placeholder, icon, defaultValue }: { label: string
 
 function TextArea({ label, name, placeholder, defaultValue }: { label: string, name: string, placeholder: string, defaultValue?: string }) {
   return (
-    <div className="space-y-1.5">
-      <label className="block text-xs font-semibold text-ink/70 ml-1">{label}</label>
+    <div className="space-y-2">
+      <label className="block text-[10px] font-black uppercase tracking-widest text-slate-400 ml-1">{label}</label>
       <textarea 
         name={name}
         defaultValue={defaultValue}
@@ -1175,8 +1225,10 @@ const LeadCard: React.FC<{
   onGenerateDraft: () => void,
   isGeneratingDraft: boolean,
   onGenerateDossier: () => void,
-  isGeneratingDossier: boolean
-}> = ({ lead, campaigns, onUpdate, onDelete, onGenerateDraft, isGeneratingDraft, onGenerateDossier, isGeneratingDossier }) => {
+  isGeneratingDossier: boolean,
+  hasDraft?: boolean,
+  onViewDraft?: () => void
+}> = ({ lead, campaigns, onUpdate, onDelete, onGenerateDraft, isGeneratingDraft, onGenerateDossier, isGeneratingDossier, hasDraft, onViewDraft }) => {
   const [isFindingEmail, setIsFindingEmail] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const [showPushMenu, setShowPushMenu] = useState(false);
@@ -1227,18 +1279,18 @@ const LeadCard: React.FC<{
   };
 
   const statusColors = {
-    new: 'bg-slate-200',
-    contacted: 'bg-slate-400',
-    replied: 'bg-[#10B981]',
-    booked: 'bg-accent',
+    new: 'bg-slate-300',
+    contacted: 'bg-blue-400',
+    replied: 'bg-emerald-500',
+    booked: 'bg-emerald-600',
     rejected: 'bg-rose-500'
   };
 
   const getPriorityLevel = (score: number) => {
     if (score > 150) return { label: 'Urgent', color: 'bg-rose-500 text-white' };
-    if (score > 100) return { label: 'High', color: 'bg-accent text-white' };
-    if (score > 50) return { label: 'Medium', color: 'bg-accent-soft text-ink' };
-    return { label: 'Low', color: 'bg-slate-100 text-slate-400' };
+    if (score > 100) return { label: 'High', color: 'bg-amber-500 text-white' };
+    if (score > 50) return { label: 'Medium', color: 'bg-blue-500 text-white' };
+    return { label: 'Low', color: 'bg-slate-800 text-slate-400' };
   };
 
   const priority = getPriorityLevel(lead.priorityScore);
@@ -1246,262 +1298,257 @@ const LeadCard: React.FC<{
   return (
     <motion.div 
       layout 
-      whileHover={{ y: -4 }}
-      className="premium-card p-8 flex flex-col h-full group relative"
+      initial={{ opacity: 0, y: 20 }}
+      animate={{ opacity: 1, y: 0 }}
+      whileHover={{ y: -8 }}
+      className="glass-card overflow-hidden flex flex-col h-full group"
     >
-      <div className="absolute top-4 right-4 flex items-center gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
-        <button 
-          onClick={onGenerateDossier}
-          disabled={isGeneratingDossier}
-          className="p-2 bg-white shadow-sm border border-line text-ink/40 hover:text-accent rounded-lg transition-all"
-          title="Deep Research Dossier"
-        >
-          {isGeneratingDossier ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-        </button>
-        <button 
-          onClick={onDelete}
-          className="p-2 bg-white shadow-sm border border-line text-ink/40 hover:text-red-500 rounded-lg transition-all"
-          title="Delete Lead"
-        >
-          <Trash2 className="w-4 h-4" />
-        </button>
-      </div>
-
-      <div className="flex justify-between items-start mb-6">
-        <div className="flex items-center gap-4 flex-1 min-w-0">
-          <div className="w-14 h-14 bg-ink/5 rounded-2xl flex items-center justify-center text-ink/50 group-hover:text-ink transition-all duration-500 relative overflow-hidden flex-shrink-0">
-            {lead.avatarUrl ? (
-              <img 
-                src={lead.avatarUrl} 
-                alt={lead.name} 
-                referrerPolicy="no-referrer"
-                className="w-full h-full object-cover"
-              />
-            ) : (
-              <User className="w-7 h-7" />
-            )}
-          </div>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2 mb-1.5">
-              <div className={`w-2 h-2 rounded-full ${statusColors[lead.status]} shadow-sm`} />
-              <select 
-                value={lead.status}
-                onChange={(e) => onUpdate({ status: e.target.value as any })}
-                className="text-[10px] font-bold uppercase tracking-wider text-ink/60 bg-transparent outline-none cursor-pointer hover:text-ink transition-all"
-              >
-                <option value="new">New</option>
-                <option value="contacted">Contacted</option>
-                <option value="replied">Replied</option>
-                <option value="booked">Booked</option>
-                <option value="rejected">Rejected</option>
-              </select>
-            </div>
-            <h3 className="text-xl font-bold leading-tight truncate text-ink">{lead.name}</h3>
-            <p className="text-xs font-bold text-accent mt-1 truncate">{lead.title}</p>
-          </div>
-        </div>
-        <div className="flex flex-col items-end gap-2 flex-shrink-0">
-          <div className="flex flex-wrap justify-end gap-1.5">
-            {lead.triggerPriority && (
-              <div className={`px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider shadow-sm whitespace-nowrap ${
-                lead.triggerPriority === 'High' ? 'bg-rose-50 text-rose-600 border border-rose-100' :
-                lead.triggerPriority === 'Medium' ? 'bg-orange-50 text-orange-600 border border-orange-100' :
-                'bg-accent-soft text-accent border border-accent/10'
-              }`}>
-                {lead.triggerPriority} Intent
-              </div>
-            )}
-            <div className={`${priority.color} px-2.5 py-1 rounded-full text-[10px] font-bold uppercase tracking-wider shadow-sm whitespace-nowrap`}>
-              {priority.label}
-            </div>
-          </div>
-          <div className="flex items-center gap-1.5">
-            <div className={`w-1.5 h-1.5 rounded-full ${lead.confidenceScore > 80 ? 'bg-emerald-500' : lead.confidenceScore > 50 ? 'bg-amber-500' : 'bg-red-500'}`} />
-            <span className="text-[10px] text-ink/60 font-bold uppercase tracking-wider">Confidence: {lead.confidenceScore}%</span>
-          </div>
+      {/* Card Header with Avatar */}
+      <div className="relative h-32 bg-white/40 overflow-hidden">
+        <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_50%_50%,var(--color-accent),transparent_70%)] animate-pulse" />
+        <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
+          <button 
+            onClick={onGenerateDossier}
+            disabled={isGeneratingDossier}
+            className="w-10 h-10 bg-white/80 backdrop-blur-md border border-line text-emerald-600 hover:bg-white rounded-xl flex items-center justify-center transition-all shadow-sm"
+            title="Deep Research Dossier"
+          >
+            {isGeneratingDossier ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
+          </button>
+          <button 
+            onClick={onDelete}
+            className="w-10 h-10 bg-white/80 backdrop-blur-md border border-line text-slate-400 hover:bg-rose-50 hover:text-rose-500 rounded-xl flex items-center justify-center transition-all shadow-sm"
+            title="Delete Lead"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
         </div>
       </div>
 
-      {lead.about && (
-        <div className="mb-6 p-4 bg-ink/5 rounded-xl border border-line/50">
-          <p className="text-[10px] font-bold uppercase tracking-wider text-ink/40 mb-2">About</p>
-          <p className="text-xs text-ink/80 leading-relaxed font-medium line-clamp-3">
-            {lead.about}
-          </p>
+      <div className="px-8 pb-8 -mt-12 relative z-10 flex-grow flex flex-col">
+        <div className="flex items-end justify-between mb-6">
+          <div className="relative">
+            <div className="w-24 h-24 rounded-[2rem] border-4 border-white bg-white shadow-xl overflow-hidden flex items-center justify-center">
+              {lead.avatarUrl ? (
+                <img 
+                  src={lead.avatarUrl} 
+                  alt={lead.name} 
+                  referrerPolicy="no-referrer"
+                  className="w-full h-full object-cover"
+                />
+              ) : (
+                <User className="w-10 h-10 text-slate-200" />
+              )}
+            </div>
+            <div className={`absolute bottom-1 right-1 w-6 h-6 rounded-full ${statusColors[lead.status]} border-4 border-white shadow-sm`} />
+          </div>
+          <div className="flex flex-col items-end gap-2">
+            <div className="flex gap-2">
+              {hasDraft && (
+                <span className="px-3 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm flex items-center gap-1">
+                  <Brain className="w-3 h-3" /> Draft Ready
+                </span>
+              )}
+              <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm ${priority.color}`}>
+                {priority.label}
+              </span>
+              <span className="px-3 py-1 bg-ink text-white rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm">
+                FIT: {lead.score}%
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <div className={`w-2 h-2 rounded-full ${lead.confidenceScore > 80 ? 'bg-emerald-500' : lead.confidenceScore > 50 ? 'bg-amber-500' : 'bg-red-500'}`} />
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Confidence {lead.confidenceScore}%</span>
+            </div>
+          </div>
         </div>
-      )}
 
-      <div className="space-y-5 flex-grow">
-        <div className="flex items-center gap-3 text-sm text-ink/90">
-          <Briefcase className="w-4 h-4 text-ink/50" />
-          <span className="font-medium">{lead.company}</span>
+        <div className="mb-6">
+          <div className="flex items-center gap-2 mb-1">
+            <h3 className="text-2xl font-display font-black tracking-tight text-ink truncate">{lead.name}</h3>
+            <a href={lead.linkedinUrl} target="_blank" rel="noreferrer" className="text-slate-300 hover:text-accent transition-colors">
+              <Linkedin className="w-4 h-4" />
+            </a>
+          </div>
+          <p className="text-sm font-bold text-accent uppercase tracking-wide">{lead.title}</p>
+          <div className="flex items-center gap-2 mt-2 text-muted">
+            <Briefcase className="w-3.5 h-3.5" />
+            <span className="text-xs font-bold">{lead.company}</span>
+            {lead.location && (
+              <>
+                <div className="w-1 h-1 rounded-full bg-slate-300" />
+                <MapPin className="w-3.5 h-3.5" />
+                <span className="text-xs font-bold">{lead.location}</span>
+              </>
+            )}
+          </div>
         </div>
-        
-        {lead.location && (
-          <div className="flex items-center gap-3 text-sm text-ink/80">
-            <MapPin className="w-4 h-4 text-ink/50" />
-            <span>{lead.location}</span>
+
+        {lead.about && (
+          <div className="mb-8">
+            <p className="text-xs text-muted leading-relaxed line-clamp-2 italic">
+              "{lead.about}"
+            </p>
           </div>
         )}
 
-        <div className="pt-6 border-t border-line">
-          <p className="text-xs font-bold text-ink/70 mb-3">Agent Intelligence</p>
-          <div className="bg-bg border border-line rounded-xl p-6 space-y-5">
+        <div className="space-y-6 flex-grow">
+          {/* Intelligence Section */}
+          <div className="p-6 bg-white/50 rounded-2xl border border-line space-y-5">
             <div>
-              <p className="text-xs font-bold text-ink/70 mb-1.5 flex items-center justify-between">
-                <span className="flex items-center gap-2"><Zap className="w-3 h-3" /> Live Trigger</span>
-                {lead.triggerPriority && (
-                  <span className={`text-xs px-2 py-0.5 rounded-full border ${
-                    lead.triggerPriority === 'High' ? 'text-rose-500 border-rose-100 bg-rose-50/50' :
-                    lead.triggerPriority === 'Medium' ? 'text-orange-500 border-orange-100 bg-orange-50/50' :
-                    'text-accent border-accent/10 bg-accent-soft'
-                  }`}>
-                    {lead.triggerPriority} Priority
-                  </span>
-                )}
-              </p>
-              <p className="text-xs text-ink/80 leading-relaxed font-medium">"{lead.triggerEvent}"</p>
-            </div>
-            <div>
-              <p className="text-xs font-bold text-ink/70 mb-1.5 flex items-center gap-2">
-                <Brain className="w-3 h-3" /> Reasoning
-              </p>
-              <p className="text-xs text-ink/80 leading-relaxed italic">"{lead.reasoning}"</p>
-            </div>
-            {lead.personalizedHook && (
-              <div className="pt-4 border-t border-line/50">
-                <p className="text-xs font-bold text-emerald-600 mb-2 flex items-center gap-2">
-                  <Zap className="w-3 h-3" /> Personalized Hook
-                </p>
-                <div className="bg-emerald-50/50 border border-emerald-100/50 rounded-lg p-3">
-                  <p className="text-xs text-emerald-900 leading-relaxed font-medium">"{lead.personalizedHook}"</p>
-                  <button 
-                    onClick={() => navigator.clipboard.writeText(lead.personalizedHook)}
-                    className="mt-2 text-xs font-bold text-emerald-600/60 hover:text-emerald-600 transition-colors flex items-center gap-1.5"
-                  >
-                    <CheckCircle2 className="w-3 h-3" /> Copy Hook
-                  </button>
-                </div>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+                  <Zap className="w-3 h-3 text-accent fill-accent" /> Intent Trigger
+                </span>
+                <span className="text-[10px] font-bold text-slate-400">LIVE SIGNAL</span>
               </div>
-            )}
-          </div>
-        </div>
-
-        {/* CRM Notes */}
-        <div className="pt-6 border-t border-line">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-xs font-bold text-ink/70">CRM Notes</p>
-            <button 
-              onClick={() => {
-                if (isEditingNotes) onUpdate({ notes });
-                setIsEditingNotes(!isEditingNotes);
-              }}
-              className="text-xs font-bold text-ink/70 hover:text-ink transition-colors"
-            >
-              {isEditingNotes ? 'Save' : 'Edit'}
-            </button>
-          </div>
-          {isEditingNotes ? (
-            <textarea 
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              className="input-premium h-24 py-3 text-xs"
-              placeholder="Add strategic notes..."
-            />
-          ) : (
-            <p className="text-xs text-ink/80 italic leading-relaxed">
-              {lead.notes || "No strategic notes documented."}
-            </p>
-          )}
-        </div>
-      </div>
-
-      <div className="mt-6 pt-6 border-t border-line space-y-3">
-        <div className="flex items-center gap-2">
-          <button 
-            onClick={onGenerateDraft}
-            disabled={isGeneratingDraft}
-            className="p-3 bg-accent/5 hover:bg-accent/10 text-accent rounded-lg transition-all flex items-center justify-center"
-            title="Generate AI Draft"
-          >
-            {isGeneratingDraft ? <Loader2 className="w-4 h-4 animate-spin" /> : <Brain className="w-4 h-4" />}
-          </button>
-          {email ? (
-            <div className="flex-1 flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2.5">
-              <span className="text-xs font-mono text-ink/80 truncate mr-2">{email}</span>
-              <button onClick={() => navigator.clipboard.writeText(email)} className="text-xs font-bold text-ink/60 hover:text-ink transition-colors">COPY</button>
+              <p className="text-xs font-bold text-ink leading-relaxed">
+                {lead.triggerEvent}
+              </p>
             </div>
-          ) : (
-            <button 
-              onClick={handleFindEmail}
-              disabled={isFindingEmail}
-              className="flex-1 flex items-center justify-center gap-2 btn-secondary !py-2.5 !text-xs"
-            >
-              {isFindingEmail ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Mail className="w-3.5 h-3.5" />}
-              Find Email
-            </button>
-          )}
-          <a 
-            href={lead.linkedinUrl} 
-            target="_blank" 
-            rel="noreferrer"
-            className="p-3 bg-ink/5 hover:bg-ink/10 text-ink/40 hover:text-ink rounded-lg transition-all"
-          >
-            <Linkedin className="w-4 h-4" />
-          </a>
+
+            <div className="pt-4 border-t border-line">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2 mb-2">
+                <Rocket className="w-3 h-3 text-accent" /> Personalized Hook
+              </span>
+              <p className="text-xs font-bold text-ink leading-relaxed italic">
+                "{lead.personalizedHook}"
+              </p>
+            </div>
+
+            <div className="pt-4 border-t border-line">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2 mb-2">
+                <Brain className="w-3 h-3 text-emerald-500" /> Agent Reasoning
+              </span>
+              <p className="text-xs text-muted leading-relaxed">
+                {lead.reasoning}
+              </p>
+            </div>
+          </div>
+
+          {/* CRM Notes */}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Strategic Notes</span>
+              <button 
+                onClick={() => {
+                  if (isEditingNotes) onUpdate({ notes });
+                  setIsEditingNotes(!isEditingNotes);
+                }}
+                className="text-[10px] font-black uppercase tracking-widest text-accent hover:text-accent-secondary transition-colors"
+              >
+                {isEditingNotes ? 'Save' : 'Edit'}
+              </button>
+            </div>
+            {isEditingNotes ? (
+              <textarea 
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="input-premium h-24 py-3 text-xs !bg-white"
+                placeholder="Add strategic notes..."
+              />
+            ) : (
+              <p className="text-xs text-muted italic min-h-[3em]">
+                {lead.notes || "No strategic notes documented."}
+              </p>
+            )}
+          </div>
         </div>
 
-        <div className="relative">
-          <button 
-            onClick={() => setShowPushMenu(!showPushMenu)}
-            disabled={isPushing || lead.status === 'contacted'}
-            className={`w-full btn-primary !py-3 !text-xs flex items-center justify-center gap-2 ${
-              lead.status === 'contacted' ? 'opacity-50 cursor-default' : ''
-            }`}
-          >
-            {isPushing ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Rocket className="w-3.5 h-3.5" />}
-            {lead.status === 'contacted' ? 'Pushed to Campaign' : 'Push to Campaign'}
-          </button>
-
-          <AnimatePresence>
-            {showPushMenu && (
-              <motion.div 
-                initial={{ opacity: 0, y: 10, scale: 0.95 }}
-                animate={{ opacity: 1, y: 0, scale: 1 }}
-                exit={{ opacity: 0, y: 10, scale: 0.95 }}
-                className="absolute bottom-full left-0 right-0 mb-3 bg-white rounded-xl border border-line shadow-xl z-50 overflow-hidden"
+        {/* Action Bar */}
+        <div className="mt-8 pt-8 border-t border-line space-y-4">
+          <div className="flex items-center gap-3">
+            <button 
+              onClick={hasDraft ? onViewDraft : onGenerateDraft}
+              disabled={isGeneratingDraft}
+              className={`group relative flex-1 h-12 rounded-xl flex items-center justify-center transition-all shadow-lg overflow-hidden ${
+                hasDraft ? 'bg-gradient-to-br from-accent to-accent-secondary shadow-accent/20' : 'bg-ink hover:bg-ink/90 shadow-ink/20'
+              }`}
+            >
+              <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+              <div className="flex items-center gap-3 z-10 text-white">
+                {isGeneratingDraft ? (
+                  <Loader2 className="w-4 h-4 animate-spin" />
+                ) : (
+                  <Brain className={`w-4 h-4 ${hasDraft ? 'text-white' : 'text-accent'}`} />
+                )}
+                <span className="text-[10px] font-black uppercase tracking-widest">
+                  {isGeneratingDraft ? 'Ghostwriting...' : hasDraft ? 'View Full Outreach' : 'Generate Full Outreach'}
+                </span>
+              </div>
+            </button>
+            
+            {email ? (
+              <div className="flex items-center justify-between bg-white rounded-xl px-4 h-12 border border-line min-w-[140px]">
+                <span className="text-[10px] font-mono font-bold text-ink truncate mr-2">{email}</span>
+                <button onClick={() => {
+                  navigator.clipboard.writeText(email);
+                  alert("Email copied!");
+                }} className="text-[10px] font-black text-accent hover:text-accent-secondary transition-colors">COPY</button>
+              </div>
+            ) : (
+              <button 
+                onClick={handleFindEmail}
+                disabled={isFindingEmail}
+                className="w-12 h-12 btn-secondary !p-0 !bg-white !border-line hover:!bg-slate-50 flex items-center justify-center"
+                title="Find Intelligence"
               >
-                <div className="p-3 border-b border-line bg-bg flex items-center justify-between">
-                  <span className="text-xs font-bold text-ink/70">Select Campaign</span>
-                  <button onClick={() => setShowPushMenu(false)} className="text-ink/50 hover:text-ink transition-colors"><X className="w-3 h-3" /></button>
-                </div>
-                <div className="max-h-60 overflow-y-auto scrollbar-hide">
-                  {campaigns.length > 0 ? (
-                    campaigns.map((camp) => (
-                      <button
-                        key={`${camp.platform}-${camp.id}`}
-                        onClick={() => handlePush(camp)}
-                        className="w-full text-left px-4 py-3 hover:bg-ink/5 transition-all flex items-center justify-between group border-b border-line last:border-0"
-                      >
-                        <div className="flex flex-col">
-                          <span className="text-xs font-bold text-ink group-hover:text-accent transition-colors">{camp.name}</span>
-                          <span className="text-xs font-medium text-ink/60 mt-0.5">{camp.platform}</span>
-                        </div>
-                        <ChevronRight className="w-4 h-4 text-ink/40 group-hover:text-accent transition-colors" />
-                      </button>
-                    ))
-                  ) : (
-                    <div className="p-8 text-center">
-                      <p className="text-xs text-ink/70">No active campaigns detected.</p>
-                    </div>
-                  )}
-                </div>
-              </motion.div>
+                {isFindingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+              </button>
             )}
-          </AnimatePresence>
+          </div>
+
+          <div className="relative">
+            <button 
+              onClick={() => setShowPushMenu(!showPushMenu)}
+              disabled={isPushing || lead.status === 'contacted'}
+              className={`w-full btn-primary !py-4 !text-xs shadow-xl shadow-accent/10 ${
+                lead.status === 'contacted' ? 'opacity-50 cursor-default' : ''
+              }`}
+            >
+              {isPushing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}
+              {lead.status === 'contacted' ? 'DEPLOYED TO CAMPAIGN' : 'DEPLOY TO CAMPAIGN'}
+            </button>
+
+            <AnimatePresence>
+              {showPushMenu && (
+                <motion.div 
+                  initial={{ opacity: 0, y: 10, scale: 0.95 }}
+                  animate={{ opacity: 1, y: 0, scale: 1 }}
+                  exit={{ opacity: 0, y: 10, scale: 0.95 }}
+                  className="absolute bottom-full left-0 right-0 mb-4 bg-white rounded-2xl border border-slate-100 shadow-2xl z-50 overflow-hidden"
+                >
+                  <div className="p-4 border-b border-slate-100 bg-slate-50 flex items-center justify-between">
+                    <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Select Deployment Target</span>
+                    <button onClick={() => setShowPushMenu(false)} className="text-slate-400 hover:text-slate-600 transition-colors"><X className="w-4 h-4" /></button>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto scrollbar-hide">
+                    {campaigns.length > 0 ? (
+                      campaigns.map((camp) => (
+                        <button
+                          key={`${camp.platform}-${camp.id}`}
+                          onClick={() => handlePush(camp)}
+                          className="w-full text-left px-6 py-4 hover:bg-slate-50 transition-all flex items-center justify-between group border-b border-slate-100 last:border-0"
+                        >
+                          <div className="flex flex-col">
+                            <span className="text-sm font-bold text-slate-900 group-hover:text-accent transition-colors">{camp.name}</span>
+                            <span className="text-[10px] font-bold text-slate-400 mt-1 uppercase tracking-widest">{camp.platform}</span>
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-slate-300 group-hover:text-accent transition-colors" />
+                        </button>
+                      ))
+                    ) : (
+                      <div className="p-10 text-center">
+                        <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">No Active Campaigns</p>
+                      </div>
+                    )}
+                  </div>
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         </div>
       </div>
-      
     </motion.div>
   );
 };

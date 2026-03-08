@@ -1,14 +1,16 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Outfit:wght@300;400;500;600;700;800;900&display=swap');
 @import "tailwindcss";
 
 @theme {
   --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-heading: "Inter", ui-sans-serif, system-ui, sans-serif;
-  --font-mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+  --font-heading: "Plus Jakarta Sans", sans-serif;
+  --font-display: "Outfit", sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
   
   --color-bg: var(--color-bg);
   --color-ink: var(--color-ink);
   --color-accent: var(--color-accent);
+  --color-accent-secondary: var(--color-accent-secondary);
   --color-accent-soft: var(--color-accent-soft);
   --color-muted: var(--color-muted);
   --color-line: var(--color-line);
@@ -19,23 +21,28 @@
 /* Theme Colors */
 :root {
   --color-bg: #F8FAFC;
-  --color-ink: #064E3B;
-  --color-accent: #FF5C00;
-  --color-accent-soft: rgba(16, 185, 129, 0.15);
-  --color-muted: #1e293b;
+  --color-ink: #064E3B; /* Deep Emerald */
+  --color-accent: #FF5C00; /* Vibrant Orange */
+  --color-accent-secondary: #E65200;
+  --color-accent-soft: rgba(255, 92, 0, 0.1);
+  --color-muted: #334155;
   --color-line: rgba(16, 185, 129, 0.15);
-  --color-card: #FFFFFF;
+  --color-card: rgba(255, 255, 255, 0.95);
   --color-input: #FFFFFF;
 }
 
 @layer base {
   body {
-    @apply bg-bg text-ink font-sans antialiased selection:bg-accent selection:text-white;
+    @apply bg-bg text-ink font-sans antialiased selection:bg-accent/10 selection:text-accent;
     line-height: 1.6;
+    background-image: 
+      radial-gradient(at 0% 0%, rgba(16, 185, 129, 0.05) 0px, transparent 50%),
+      radial-gradient(at 100% 0%, rgba(14, 165, 233, 0.05) 0px, transparent 50%);
   }
 
   h1, h2, h3, h4 {
-    @apply font-bold text-ink;
+    @apply font-heading font-bold text-ink tracking-tight;
+    line-height: 1.1;
   }
 
   p {
@@ -45,7 +52,8 @@
 
 /* Custom Scrollbar */
 ::-webkit-scrollbar {
-  width: 6px;
+  width: 5px;
+  height: 5px;
 }
 
 ::-webkit-scrollbar-track {
@@ -53,35 +61,56 @@
 }
 
 ::-webkit-scrollbar-thumb {
-  background: rgba(18, 18, 18, 0.1);
+  background: #CBD5E1;
   border-radius: 10px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: rgba(18, 18, 18, 0.2);
+  background: #94A3B8;
 }
 
 .glass {
-  @apply bg-white border-b border-line;
+  @apply bg-white/80 backdrop-blur-2xl border-b border-line sticky top-0 z-50;
 }
 
-.premium-card {
-  @apply bg-white border border-line rounded-xl transition-all duration-200 hover:shadow-md;
+.glass-card {
+  @apply bg-card backdrop-blur-3xl border border-line rounded-[2rem] transition-all duration-500 hover:shadow-[0_24px_64px_-12px_rgba(6,78,59,0.08)] hover:border-accent/30;
 }
 
 .input-premium {
-  @apply w-full bg-white border border-line rounded-lg px-4 py-3 text-sm outline-none focus:border-accent transition-all placeholder:text-muted/40 text-ink;
+  @apply w-full bg-white border border-line rounded-2xl px-5 py-4 text-sm outline-none focus:border-accent focus:ring-4 focus:ring-accent/5 transition-all placeholder:text-slate-400 text-ink;
 }
 
 .btn-primary {
-  @apply bg-accent text-white px-6 py-3 rounded-lg font-medium transition-all hover:bg-accent/90 active:scale-[0.98] disabled:opacity-50;
+  @apply bg-gradient-to-br from-accent to-accent-secondary text-white px-8 py-4 rounded-2xl font-bold transition-all hover:shadow-xl hover:shadow-accent/30 hover:-translate-y-0.5 active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2.5;
 }
 
 .btn-secondary {
-  @apply bg-white border border-line text-ink px-6 py-3 rounded-lg font-medium transition-all hover:bg-gray-50 active:scale-[0.98] disabled:opacity-50;
+  @apply bg-white border border-line text-ink px-8 py-4 rounded-2xl font-bold transition-all hover:bg-slate-50 hover:border-slate-300 active:scale-[0.98] disabled:opacity-50 flex items-center justify-center gap-2.5;
+}
+
+.text-gradient {
+  @apply bg-gradient-to-br from-ink to-accent bg-clip-text text-transparent;
+}
+
+.bg-grid {
+  background-size: 50px 50px;
+  background-image: 
+    linear-gradient(to right, rgba(16, 185, 129, 0.03) 1px, transparent 1px),
+    linear-gradient(to bottom, rgba(16, 185, 129, 0.03) 1px, transparent 1px);
 }
 
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
+}
+
+/* Animation Utilities */
+@keyframes floating {
+  0%, 100% { transform: translateY(0); }
+  50% { transform: translateY(-10px); }
+}
+
+.animate-floating {
+  animation: floating 4s ease-in-out infinite;
 }
 
