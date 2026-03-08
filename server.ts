@@ -8,7 +8,21 @@ import axios from "axios";
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const db = new Database("leads.db");
+// --- PERSISTENT STORAGE ---
+// On platforms like Railway/Render, we use a /data volume to persist the SQLite file.
+const DB_DIR = process.env.DATABASE_URL ? path.dirname(process.env.DATABASE_URL) : (process.env.NODE_ENV === 'production' ? '/data' : '.');
+const DB_PATH = process.env.DATABASE_URL || path.join(DB_DIR, "leads.db");
+
+// Ensure data directory exists in production if using /data
+if (process.env.NODE_ENV === 'production' && DB_DIR === '/data') {
+  import('fs').then(fs => {
+    if (!fs.existsSync(DB_DIR)) {
+      try { fs.mkdirSync(DB_DIR, { recursive: true }); } catch (e) { console.error("Could not create /data dir", e); }
+    }
+  });
+}
+
+const db = new Database(DB_PATH);
 
 // --- ENTERPRISE REPOSITORY PATTERN ---
 // This layer abstracts the database. To scale to PostgreSQL/MySQL, 
@@ -415,9 +429,11 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    app.use(express.static(path.join(__dirname, "dist")));
+    // When bundled, __dirname is 'dist', so we serve from '.'
+    const staticPath = path.join(__dirname);
+    app.use(express.static(staticPath));
     app.get("*", (req, res) => {
-      res.sendFile(path.join(__dirname, "dist", "index.html"));
+      res.sendFile(path.join(staticPath, "index.html"));
     });
   }
 
