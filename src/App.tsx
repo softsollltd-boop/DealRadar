@@ -10,8 +10,11 @@ import { motion, AnimatePresence } from 'motion/react';
 import { BusinessProfile, IntentTrigger, AgentLead, AppConfig, Integrations, Campaign, GhostwriterDraft, Dossier } from './types';
 import { analyzeBusiness, huntLeads, findEmail, generateDraft, generateDossier } from './services/gemini';
 import { HuntingRadar } from './components/HuntingRadar';
+import { LandingPage } from './components/LandingPage';
+import { OnboardingTour } from './components/OnboardingTour';
 
 export default function App() {
+  const [showLanding, setShowLanding] = useState(true);
   const [activeTab, setActiveTab] = useState<'dashboard' | 'business' | 'triggers' | 'settings'>('dashboard');
   const [business, setBusiness] = useState<BusinessProfile | null>(null);
   const [triggers, setTriggers] = useState<IntentTrigger[]>([]);
@@ -32,6 +35,19 @@ export default function App() {
   const [isGeneratingDossier, setIsGeneratingDossier] = useState(false);
   const [currentDossier, setCurrentDossier] = useState<Dossier | null>(null);
   const [showDossierModal, setShowDossierModal] = useState(false);
+  const [runTour, setRunTour] = useState(false);
+
+  useEffect(() => {
+    const hasSeenTour = localStorage.getItem('dealradar-tour-seen');
+    if (!showLanding && !hasSeenTour) {
+      setRunTour(true);
+    }
+  }, [showLanding]);
+
+  const handleTourFinish = () => {
+    setRunTour(false);
+    localStorage.setItem('dealradar-tour-seen', 'true');
+  };
 
   const handleGenerateDossier = async (lead: AgentLead) => {
     setIsGeneratingDossier(true);
@@ -49,15 +65,25 @@ export default function App() {
 
       const dossier = await generateDossier(lead.company, lead.companyDomain || '');
       
+      const dossierData = {
+        companyDomain: lead.companyDomain,
+        companyName: lead.company,
+        summary: dossier.summary,
+        keyExecutives: dossier.keyExecutives,
+        recentNews: dossier.recentNews,
+        financialPerformance: dossier.financialPerformance,
+        competitors: dossier.competitors,
+        techStack: dossier.techStack,
+        strategicPriorities: dossier.strategicPriorities,
+        painPoints: dossier.painPoints,
+        updatedAt: dossier.updatedAt
+      };
+      
       // Save to DB
       await fetch('/api/dossiers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...dossier,
-          companyDomain: lead.companyDomain,
-          companyName: lead.company
-        })
+        body: JSON.stringify(dossierData)
       });
 
       setCurrentDossier(dossier);
@@ -186,7 +212,7 @@ export default function App() {
         };
         return {
           ...baseLead,
-          priorityScore: calculatePriorityScore(baseLead as any)
+          priorityScore: calculatePriorityScore(baseLead)
         };
       }));
       setConfig(conf);
@@ -234,10 +260,21 @@ export default function App() {
     try {
       const newTriggers = await analyzeBusiness(business, config.strategistSystemPrompt);
       const sortedTriggers = [...newTriggers].sort((a, b) => (a.rank || 0) - (b.rank || 0));
+      const triggersPayload = sortedTriggers.map(t => ({
+        id: t.id,
+        title: t.title,
+        description: t.description,
+        reasoning: t.reasoning,
+        keywords: t.keywords,
+        priority: t.priority,
+        maxAgeDays: t.maxAgeDays,
+        rank: t.rank
+      }));
+
       await fetch('/api/triggers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ triggers: sortedTriggers })
+        body: JSON.stringify({ triggers: triggersPayload })
       });
       setTriggers(sortedTriggers);
       setActiveTab('triggers');
@@ -270,21 +307,33 @@ export default function App() {
           }
         }
 
+        const leadPayload = {
+          id: lead.id,
+          name: lead.name,
+          title: lead.title,
+          company: lead.company,
+          location: lead.location,
+          email,
+          linkedin_url: lead.linkedinUrl,
+          avatar_url: lead.avatarUrl,
+          about: lead.about,
+          company_domain: lead.companyDomain,
+          trigger_event: lead.triggerEvent,
+          trigger_priority: lead.triggerPriority,
+          personalized_hook: lead.personalizedHook,
+          reasoning: lead.reasoning,
+          score: lead.score,
+          confidence_score: lead.confidenceScore,
+          source_citations: lead.sourceCitations || [],
+          status: 'new',
+          notes: '',
+          priority_score: calculatePriorityScore({ ...lead, email })
+        };
+
         await fetch('/api/leads', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...lead,
-            email,
-            linkedin_url: lead.linkedinUrl,
-            avatar_url: lead.avatarUrl,
-            about: lead.about,
-            company_domain: lead.companyDomain,
-            trigger_event: lead.triggerEvent,
-            trigger_priority: lead.triggerPriority,
-            personalized_hook: lead.personalizedHook,
-            priority_score: calculatePriorityScore({ ...lead, email })
-          })
+          body: JSON.stringify(leadPayload)
         });
       }
       fetchInitialData();
@@ -349,12 +398,18 @@ export default function App() {
       const updatedLead = { ...currentLead, ...updates };
       const newPriorityScore = calculatePriorityScore(updatedLead);
       
-      const finalUpdates = { ...updates, priority_score: newPriorityScore };
+      // Manually pick fields to avoid any accidental circular refs from React/DOM
+      const payload: any = {};
+      if (updates.status) payload.status = updates.status;
+      if (updates.notes !== undefined) payload.notes = updates.notes;
+      if (updates.email) payload.email = updates.email;
+      if (updates.triggerPriority) payload.trigger_priority = updates.triggerPriority;
+      payload.priority_score = newPriorityScore;
 
       await fetch(`/api/leads/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(finalUpdates)
+        body: JSON.stringify(payload)
       });
       
       setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates, priorityScore: newPriorityScore } : l));
@@ -407,8 +462,14 @@ export default function App() {
     );
   }
 
+  if (showLanding) {
+    return <LandingPage onStart={() => setShowLanding(false)} />;
+  }
+
   return (
     <div className="min-h-screen bg-bg selection:bg-accent/20 bg-grid">
+      <OnboardingTour run={runTour} onFinish={handleTourFinish} />
+
       {/* Navigation */}
       <nav className="sticky top-0 z-50 glass px-6 py-4 transition-all duration-500">
         <div className="max-w-7xl mx-auto flex items-center justify-between">
@@ -424,10 +485,10 @@ export default function App() {
           
           {/* Desktop Nav */}
           <div className="hidden md:flex items-center gap-1 bg-slate-50 p-1.5 rounded-2xl border border-slate-100">
-            <NavButton active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<Briefcase className="w-4 h-4" />} label="Pipeline" />
-            <NavButton active={activeTab === 'business'} onClick={() => setActiveTab('business')} icon={<Globe className="w-4 h-4" />} label="Strategy" />
-            <NavButton active={activeTab === 'triggers'} onClick={() => setActiveTab('triggers')} icon={<Target className="w-4 h-4" />} label="Intents" />
-            <NavButton active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon={<Settings className="w-4 h-4" />} label="Engine" />
+            <NavButton id="tour-dashboard" active={activeTab === 'dashboard'} onClick={() => setActiveTab('dashboard')} icon={<Briefcase className="w-4 h-4" />} label="Pipeline" />
+            <NavButton id="tour-business" active={activeTab === 'business'} onClick={() => setActiveTab('business')} icon={<Globe className="w-4 h-4" />} label="Strategy" />
+            <NavButton id="tour-triggers" active={activeTab === 'triggers'} onClick={() => setActiveTab('triggers')} icon={<Target className="w-4 h-4" />} label="Intents" />
+            <NavButton id="tour-settings" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} icon={<Settings className="w-4 h-4" />} label="Engine" />
           </div>
 
           {/* Mobile Menu Toggle */}
@@ -524,17 +585,18 @@ export default function App() {
                   <button onClick={fetchInitialData} className="p-3 hover:bg-white rounded-xl transition-all text-ink border border-line bg-white/50">
                     <RefreshCw className="w-5 h-5" />
                   </button>
-                  <button onClick={() => setActiveTab('triggers')} className="btn-primary !px-6 !py-3">
+                  <button id="tour-launch-hunter" onClick={() => setActiveTab('triggers')} className="btn-primary !px-6 !py-3">
                     <Zap className="w-4 h-4 fill-current" />
                     Launch Hunter
                   </button>
                 </div>
               </div>
 
-              <div className="flex flex-col lg:flex-row gap-6 items-stretch lg:items-center justify-between bg-white/40 backdrop-blur-md p-6 rounded-[2rem] border border-line shadow-sm">
+              <div id="tour-filters" className="flex flex-col lg:flex-row gap-6 items-stretch lg:items-center justify-between bg-white/40 backdrop-blur-md p-6 rounded-[2rem] border border-line shadow-sm">
                 <div className="relative w-full lg:w-[540px]">
                   <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
                   <input 
+                    id="tour-search"
                     type="text" 
                     placeholder="Search by name, company, or role..." 
                     value={searchQuery}
@@ -602,9 +664,10 @@ export default function App() {
                       if (sortBy === 'score') return b.score - a.score;
                       return b.createdAt - a.createdAt;
                     })
-                    .map((lead) => (
+                    .map((lead, index) => (
                       <LeadCard 
                         key={lead.id} 
+                        id={index === 0 ? "tour-lead-card" : undefined}
                         lead={lead} 
                         campaigns={campaigns}
                         onUpdate={(updates) => handleUpdateLead(lead.id, updates)}
@@ -1161,13 +1224,14 @@ export default function App() {
   );
 }
 
-function NavButton({ active, onClick, icon, label }: { active: boolean, onClick: () => void, icon: React.ReactNode, label: string }) {
+function NavButton({ active, onClick, icon, label, id }: { active: boolean, onClick: () => void, icon: React.ReactElement, label: string, id?: string }) {
   return (
     <button 
+      id={id}
       onClick={onClick}
       className={`flex items-center gap-2 px-5 py-2.5 rounded-xl text-xs font-bold transition-all duration-300 ${active ? 'bg-white shadow-md text-accent border border-slate-100' : 'text-slate-400 hover:text-slate-600 hover:bg-slate-100'}`}
     >
-      {React.cloneElement(icon as React.ReactElement, { className: `w-3.5 h-3.5 ${active ? 'text-accent' : 'text-slate-400'}` })}
+      {React.cloneElement(icon, { className: `w-3.5 h-3.5 ${active ? 'text-accent' : 'text-slate-400'}` } as any)}
       {label}
     </button>
   );
@@ -1227,8 +1291,9 @@ const LeadCard: React.FC<{
   onGenerateDossier: () => void,
   isGeneratingDossier: boolean,
   hasDraft?: boolean,
-  onViewDraft?: () => void
-}> = ({ lead, campaigns, onUpdate, onDelete, onGenerateDraft, isGeneratingDraft, onGenerateDossier, isGeneratingDossier, hasDraft, onViewDraft }) => {
+  onViewDraft?: () => void,
+  id?: string
+}> = ({ lead, campaigns, onUpdate, onDelete, onGenerateDraft, isGeneratingDraft, onGenerateDossier, isGeneratingDossier, hasDraft, onViewDraft, id }) => {
   const [isFindingEmail, setIsFindingEmail] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const [showPushMenu, setShowPushMenu] = useState(false);
@@ -1258,10 +1323,14 @@ const LeadCard: React.FC<{
     }
     setIsPushing(true);
     try {
+      const pushPayload = { 
+        platform: campaign.platform, 
+        campaignId: campaign.id 
+      };
       const res = await fetch(`/api/leads/${lead.id}/push`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ platform: campaign.platform, campaignId: campaign.id })
+        body: JSON.stringify(pushPayload)
       });
       if (res.ok) {
         onUpdate({ status: 'contacted' });
@@ -1278,57 +1347,62 @@ const LeadCard: React.FC<{
     }
   };
 
-  const statusColors = {
-    new: 'bg-slate-300',
-    contacted: 'bg-blue-400',
-    replied: 'bg-emerald-500',
-    booked: 'bg-emerald-600',
-    rejected: 'bg-rose-500'
+  const statusConfig = {
+    new: { label: 'New Opportunity', color: 'bg-slate-100 text-slate-600 border-slate-200', dot: 'bg-slate-400' },
+    contacted: { label: 'Outreach Sent', color: 'bg-blue-50 text-blue-600 border-blue-100', dot: 'bg-blue-400' },
+    replied: { label: 'Lead Replied', color: 'bg-emerald-50 text-emerald-600 border-emerald-100', dot: 'bg-emerald-500' },
+    booked: { label: 'Meeting Booked', color: 'bg-emerald-100 text-emerald-700 border-emerald-200', dot: 'bg-emerald-600' },
+    rejected: { label: 'Not Interested', color: 'bg-rose-50 text-rose-600 border-rose-100', dot: 'bg-rose-500' }
   };
 
   const getPriorityLevel = (score: number) => {
     if (score > 150) return { label: 'Urgent', color: 'bg-rose-500 text-white' };
-    if (score > 100) return { label: 'High', color: 'bg-amber-500 text-white' };
-    if (score > 50) return { label: 'Medium', color: 'bg-blue-500 text-white' };
-    return { label: 'Low', color: 'bg-slate-800 text-slate-400' };
+    if (score > 100) return { label: 'High Priority', color: 'bg-amber-500 text-white' };
+    if (score > 50) return { label: 'Medium Priority', color: 'bg-blue-500 text-white' };
+    return { label: 'Low Priority', color: 'bg-slate-800 text-slate-400' };
   };
 
   const priority = getPriorityLevel(lead.priorityScore);
+  const status = statusConfig[lead.status];
 
   return (
     <motion.div 
+      id={id}
       layout 
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ y: -8 }}
-      className="glass-card overflow-hidden flex flex-col h-full group"
+      className="glass-card overflow-hidden flex flex-col h-full group border-line hover:border-accent/30 transition-all duration-500"
     >
-      {/* Card Header with Avatar */}
-      <div className="relative h-32 bg-white/40 overflow-hidden">
-        <div className="absolute inset-0 opacity-10 bg-[radial-gradient(circle_at_50%_50%,var(--color-accent),transparent_70%)] animate-pulse" />
+      {/* Card Header with Background & Quick Actions */}
+      <div className="relative h-28 bg-slate-50 overflow-hidden border-b border-line">
+        <div className="absolute inset-0 opacity-[0.03] bg-grid" />
+        <div className="absolute inset-0 bg-gradient-to-br from-accent/5 via-transparent to-emerald-500/5" />
+        
         <div className="absolute top-4 right-4 flex items-center gap-2 z-10">
           <button 
-            onClick={onGenerateDossier}
-            disabled={isGeneratingDossier}
-            className="w-10 h-10 bg-white/80 backdrop-blur-md border border-line text-emerald-600 hover:bg-white rounded-xl flex items-center justify-center transition-all shadow-sm"
-            title="Deep Research Dossier"
-          >
-            {isGeneratingDossier ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-          </button>
-          <button 
             onClick={onDelete}
-            className="w-10 h-10 bg-white/80 backdrop-blur-md border border-line text-slate-400 hover:bg-rose-50 hover:text-rose-500 rounded-xl flex items-center justify-center transition-all shadow-sm"
+            className="w-9 h-9 bg-white/90 backdrop-blur-md border border-line text-slate-400 hover:bg-rose-50 hover:text-rose-500 rounded-xl flex items-center justify-center transition-all shadow-sm group/del"
             title="Delete Lead"
           >
-            <Trash2 className="w-4 h-4" />
+            <Trash2 className="w-4 h-4 group-hover/del:scale-110 transition-transform" />
           </button>
+        </div>
+
+        {/* Status Badge - Floating Top Left */}
+        <div className="absolute top-4 left-4 z-10">
+          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-widest shadow-sm backdrop-blur-md ${status.color}`}>
+            <div className={`w-1.5 h-1.5 rounded-full ${status.dot} animate-pulse`} />
+            {status.label}
+          </div>
         </div>
       </div>
 
-      <div className="px-8 pb-8 -mt-12 relative z-10 flex-grow flex flex-col">
-        <div className="flex items-end justify-between mb-6">
+      <div className="px-8 pb-8 -mt-10 relative z-10 flex-grow flex flex-col">
+        {/* Identity Section */}
+        <div className="flex items-start justify-between mb-8">
           <div className="relative">
-            <div className="w-24 h-24 rounded-[2rem] border-4 border-white bg-white shadow-xl overflow-hidden flex items-center justify-center">
+            <div className="w-20 h-20 rounded-[1.75rem] border-4 border-white bg-white shadow-2xl overflow-hidden flex items-center justify-center group-hover:scale-105 transition-transform duration-500">
               {lead.avatarUrl ? (
                 <img 
                   src={lead.avatarUrl} 
@@ -1337,105 +1411,119 @@ const LeadCard: React.FC<{
                   className="w-full h-full object-cover"
                 />
               ) : (
-                <User className="w-10 h-10 text-slate-200" />
+                <div className="w-full h-full bg-slate-50 flex items-center justify-center">
+                  <User className="w-8 h-8 text-slate-200" />
+                </div>
               )}
             </div>
-            <div className={`absolute bottom-1 right-1 w-6 h-6 rounded-full ${statusColors[lead.status]} border-4 border-white shadow-sm`} />
           </div>
-          <div className="flex flex-col items-end gap-2">
+          
+          <div className="flex flex-col items-end gap-2 pt-2">
             <div className="flex gap-2">
-              {hasDraft && (
-                <span className="px-3 py-1 bg-emerald-50 text-emerald-600 border border-emerald-100 rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm flex items-center gap-1">
-                  <Brain className="w-3 h-3" /> Draft Ready
-                </span>
-              )}
-              <span className={`px-3 py-1 rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm ${priority.color}`}>
+              <span className={`px-3 py-1 rounded-full text-[9px] font-black uppercase tracking-widest shadow-sm ${priority.color}`}>
                 {priority.label}
               </span>
-              <span className="px-3 py-1 bg-ink text-white rounded-full text-[10px] font-black uppercase tracking-widest shadow-sm">
+              <span className="px-3 py-1 bg-ink text-white rounded-full text-[9px] font-black uppercase tracking-widest shadow-sm">
                 FIT: {lead.score}%
               </span>
             </div>
             <div className="flex items-center gap-1.5">
-              <div className={`w-2 h-2 rounded-full ${lead.confidenceScore > 80 ? 'bg-emerald-500' : lead.confidenceScore > 50 ? 'bg-amber-500' : 'bg-red-500'}`} />
-              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest">Confidence {lead.confidenceScore}%</span>
+              <div className={`w-1.5 h-1.5 rounded-full ${lead.confidenceScore > 80 ? 'bg-emerald-500' : lead.confidenceScore > 50 ? 'bg-amber-500' : 'bg-red-500'}`} />
+              <span className="text-[9px] font-bold text-slate-400 uppercase tracking-widest">Confidence {lead.confidenceScore}%</span>
             </div>
           </div>
         </div>
 
-        <div className="mb-6">
-          <div className="flex items-center gap-2 mb-1">
-            <h3 className="text-2xl font-display font-black tracking-tight text-ink truncate">{lead.name}</h3>
-            <a href={lead.linkedinUrl} target="_blank" rel="noreferrer" className="text-slate-300 hover:text-accent transition-colors">
+        <div className="mb-8">
+          <div className="flex items-center gap-2 mb-2">
+            <h3 className="text-2xl font-display font-black tracking-tighter text-ink truncate leading-none">{lead.name}</h3>
+            <a href={lead.linkedinUrl} target="_blank" rel="noreferrer" className="text-slate-300 hover:text-accent transition-colors p-1">
               <Linkedin className="w-4 h-4" />
             </a>
           </div>
-          <p className="text-sm font-bold text-accent uppercase tracking-wide">{lead.title}</p>
-          <div className="flex items-center gap-2 mt-2 text-muted">
-            <Briefcase className="w-3.5 h-3.5" />
-            <span className="text-xs font-bold">{lead.company}</span>
+          <p className="text-xs font-black text-accent uppercase tracking-[0.15em] mb-4">{lead.title}</p>
+          
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-2 text-muted">
+            <div className="flex items-center gap-1.5">
+              <Briefcase className="w-3.5 h-3.5 text-slate-300" />
+              <span className="text-[11px] font-bold text-ink/70">{lead.company}</span>
+            </div>
             {lead.location && (
-              <>
-                <div className="w-1 h-1 rounded-full bg-slate-300" />
-                <MapPin className="w-3.5 h-3.5" />
-                <span className="text-xs font-bold">{lead.location}</span>
-              </>
+              <div className="flex items-center gap-1.5">
+                <MapPin className="w-3.5 h-3.5 text-slate-300" />
+                <span className="text-[11px] font-bold text-ink/70">{lead.location}</span>
+              </div>
             )}
           </div>
         </div>
 
         {lead.about && (
-          <div className="mb-8">
-            <p className="text-xs text-muted leading-relaxed line-clamp-2 italic">
+          <div className="mb-8 p-4 bg-slate-50/50 rounded-2xl border border-dashed border-line">
+            <p className="text-[11px] text-muted leading-relaxed line-clamp-2 italic font-medium">
               "{lead.about}"
             </p>
           </div>
         )}
 
-        <div className="space-y-6 flex-grow">
+        <div className="space-y-8 flex-grow">
           {/* Intelligence Section */}
-          <div className="p-6 bg-white/50 rounded-2xl border border-line space-y-5">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2">
+          <div className="space-y-6">
+            <div className="group/item">
+              <div className="flex items-center justify-between mb-3">
+                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2">
                   <Zap className="w-3 h-3 text-accent fill-accent" /> Intent Trigger
                 </span>
-                <span className="text-[10px] font-bold text-slate-400">LIVE SIGNAL</span>
+                <span className="text-[8px] font-bold text-accent/40 group-hover/item:text-accent transition-colors">LIVE SIGNAL</span>
               </div>
-              <p className="text-xs font-bold text-ink leading-relaxed">
+              <p className="text-xs font-bold text-ink leading-relaxed pl-5 border-l-2 border-accent/10 group-hover/item:border-accent transition-colors">
                 {lead.triggerEvent}
               </p>
             </div>
 
-            <div className="pt-4 border-t border-line">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2 mb-2">
+            <div className="group/item">
+              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2 mb-3">
                 <Rocket className="w-3 h-3 text-accent" /> Personalized Hook
               </span>
-              <p className="text-xs font-bold text-ink leading-relaxed italic">
+              <p className="text-xs font-bold text-ink leading-relaxed italic pl-5 border-l-2 border-accent/10 group-hover/item:border-accent transition-colors">
                 "{lead.personalizedHook}"
               </p>
             </div>
+          </div>
 
-            <div className="pt-4 border-t border-line">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400 flex items-center gap-2 mb-2">
-                <Brain className="w-3 h-3 text-emerald-500" /> Agent Reasoning
-              </span>
-              <p className="text-xs text-muted leading-relaxed">
-                {lead.reasoning}
-              </p>
-            </div>
+          {/* Primary Intelligence Actions */}
+          <div className="grid grid-cols-2 gap-3">
+            <button 
+              onClick={onGenerateDossier}
+              disabled={isGeneratingDossier}
+              className="flex items-center justify-center gap-2 py-3 bg-white border border-line rounded-xl text-[10px] font-black uppercase tracking-widest text-ink hover:bg-slate-50 hover:border-accent/30 transition-all shadow-sm disabled:opacity-50"
+            >
+              {isGeneratingDossier ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Search className="w-3.5 h-3.5 text-emerald-500" />}
+              Deep Research
+            </button>
+            <button 
+              onClick={hasDraft ? onViewDraft : onGenerateDraft}
+              disabled={isGeneratingDraft}
+              className={`flex items-center justify-center gap-2 py-3 border rounded-xl text-[10px] font-black uppercase tracking-widest transition-all shadow-sm disabled:opacity-50 ${
+                hasDraft 
+                  ? 'bg-emerald-50 border-emerald-100 text-emerald-600 hover:bg-emerald-100' 
+                  : 'bg-white border-line text-ink hover:bg-slate-50 hover:border-accent/30'
+              }`}
+            >
+              {isGeneratingDraft ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Brain className={`w-3.5 h-3.5 ${hasDraft ? 'text-emerald-500' : 'text-accent'}`} />}
+              {hasDraft ? 'View Draft' : 'Generate Draft'}
+            </button>
           </div>
 
           {/* CRM Notes */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-black uppercase tracking-widest text-slate-400">Strategic Notes</span>
+              <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Strategic Notes</span>
               <button 
                 onClick={() => {
                   if (isEditingNotes) onUpdate({ notes });
                   setIsEditingNotes(!isEditingNotes);
                 }}
-                className="text-[10px] font-black uppercase tracking-widest text-accent hover:text-accent-secondary transition-colors"
+                className="text-[9px] font-black uppercase tracking-widest text-accent hover:text-accent-secondary transition-colors"
               >
                 {isEditingNotes ? 'Save' : 'Edit'}
               </button>
@@ -1458,42 +1546,25 @@ const LeadCard: React.FC<{
         {/* Action Bar */}
         <div className="mt-8 pt-8 border-t border-line space-y-4">
           <div className="flex items-center gap-3">
-            <button 
-              onClick={hasDraft ? onViewDraft : onGenerateDraft}
-              disabled={isGeneratingDraft}
-              className={`group relative flex-1 h-12 rounded-xl flex items-center justify-center transition-all shadow-lg overflow-hidden ${
-                hasDraft ? 'bg-gradient-to-br from-accent to-accent-secondary shadow-accent/20' : 'bg-ink hover:bg-ink/90 shadow-ink/20'
-              }`}
-            >
-              <div className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
-              <div className="flex items-center gap-3 z-10 text-white">
-                {isGeneratingDraft ? (
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                ) : (
-                  <Brain className={`w-4 h-4 ${hasDraft ? 'text-white' : 'text-accent'}`} />
-                )}
-                <span className="text-[10px] font-black uppercase tracking-widest">
-                  {isGeneratingDraft ? 'Ghostwriting...' : hasDraft ? 'View Full Outreach' : 'Generate Full Outreach'}
-                </span>
-              </div>
-            </button>
-            
             {email ? (
-              <div className="flex items-center justify-between bg-white rounded-xl px-4 h-12 border border-line min-w-[140px]">
-                <span className="text-[10px] font-mono font-bold text-ink truncate mr-2">{email}</span>
+              <div className="flex items-center justify-between bg-slate-50 rounded-xl px-4 h-12 border border-line flex-grow">
+                <div className="flex items-center gap-2 truncate">
+                  <Mail className="w-3.5 h-3.5 text-slate-300" />
+                  <span className="text-[10px] font-mono font-bold text-ink truncate">{email}</span>
+                </div>
                 <button onClick={() => {
                   navigator.clipboard.writeText(email);
                   alert("Email copied!");
-                }} className="text-[10px] font-black text-accent hover:text-accent-secondary transition-colors">COPY</button>
+                }} className="text-[9px] font-black text-accent hover:text-accent-secondary transition-colors ml-2">COPY</button>
               </div>
             ) : (
               <button 
                 onClick={handleFindEmail}
                 disabled={isFindingEmail}
-                className="w-12 h-12 btn-secondary !p-0 !bg-white !border-line hover:!bg-slate-50 flex items-center justify-center"
-                title="Find Intelligence"
+                className="flex-grow h-12 bg-white border border-line text-ink hover:bg-slate-50 hover:border-accent/30 rounded-xl font-black text-[10px] uppercase tracking-widest flex items-center justify-center gap-2 transition-all shadow-sm"
               >
-                {isFindingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4" />}
+                {isFindingEmail ? <Loader2 className="w-4 h-4 animate-spin" /> : <Mail className="w-4 h-4 text-accent" />}
+                Find Intelligence
               </button>
             )}
           </div>
@@ -1502,8 +1573,10 @@ const LeadCard: React.FC<{
             <button 
               onClick={() => setShowPushMenu(!showPushMenu)}
               disabled={isPushing || lead.status === 'contacted'}
-              className={`w-full btn-primary !py-4 !text-xs shadow-xl shadow-accent/10 ${
-                lead.status === 'contacted' ? 'opacity-50 cursor-default' : ''
+              className={`w-full h-14 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all shadow-xl ${
+                lead.status === 'contacted' 
+                  ? 'bg-slate-100 text-slate-400 cursor-default shadow-none' 
+                  : 'bg-ink text-white hover:bg-accent shadow-accent/10 hover:shadow-accent/20'
               }`}
             >
               {isPushing ? <Loader2 className="w-4 h-4 animate-spin" /> : <Target className="w-4 h-4" />}

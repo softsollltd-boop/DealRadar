@@ -20,14 +20,14 @@
 
 /* Theme Colors */
 :root {
-  --color-bg: #F8FAFC;
-  --color-ink: #064E3B; /* Deep Emerald */
-  --color-accent: #FF5C00; /* Vibrant Orange */
-  --color-accent-secondary: #E65200;
-  --color-accent-soft: rgba(255, 92, 0, 0.1);
-  --color-muted: #334155;
-  --color-line: rgba(16, 185, 129, 0.15);
-  --color-card: rgba(255, 255, 255, 0.95);
+  --color-bg: #FDFDFB;
+  --color-ink: #111827; /* Deep Slate/Black */
+  --color-accent: #4F46E5; /* Indigo */
+  --color-accent-secondary: #4338CA;
+  --color-accent-soft: rgba(79, 70, 229, 0.05);
+  --color-muted: #4B5563;
+  --color-line: rgba(17, 24, 39, 0.06);
+  --color-card: #FFFFFF;
   --color-input: #FFFFFF;
 }
 

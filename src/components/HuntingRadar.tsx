@@ -23,7 +23,7 @@ export const HuntingRadar: React.FC = () => {
       <motion.div
         animate={{ rotate: 360 }}
         transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-        className="absolute w-[600px] h-[600px] pointer-events-none z-10"
+        className="absolute w-full h-full max-w-[600px] max-h-[600px] pointer-events-none z-10"
         style={{
           background: 'conic-gradient(from 0deg, transparent 0deg, rgba(255, 92, 0, 0) 300deg, rgba(255, 92, 0, 0.05) 330deg, rgba(255, 92, 0, 0.1) 360deg)'
         }}
