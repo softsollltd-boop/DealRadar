@@ -19,8 +19,17 @@ if (process.env.NODE_ENV === 'production' && DB_DIR === '/data') {
     if (!fs.existsSync(DB_DIR)) {
       try { fs.mkdirSync(DB_DIR, { recursive: true }); } catch (e) { console.error("Could not create /data dir", e); }
     }
-  });
+  }).catch(e => console.error("Failed to import fs", e));
 }
+
+// --- GLOBAL ERROR HANDLING ---
+process.on('unhandledRejection', (reason, promise) => {
+  console.error('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+});
 
 const db = new Database(DB_PATH);
 
@@ -198,6 +207,11 @@ if (!triggerColumns.includes('rank')) {
   db.exec("ALTER TABLE intent_triggers ADD COLUMN rank INTEGER DEFAULT 0");
 }
 
+// --- UTILS ---
+const asyncHandler = (fn: Function) => (req: any, res: any, next: any) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
+
 async function startServer() {
   const app = express();
   const PORT = 3000;
@@ -251,7 +265,7 @@ async function startServer() {
   });
 
   // API Routes - Delivery Engine
-  app.get("/api/integrations/campaigns", async (req, res) => {
+  app.get("/api/integrations/campaigns", asyncHandler(async (req, res) => {
     const integrations = db.prepare("SELECT * FROM integrations LIMIT 1").get() as any;
     if (!integrations) return res.json([]);
 
@@ -288,9 +302,9 @@ async function startServer() {
     }
 
     res.json(campaigns);
-  });
+  }));
 
-  app.post("/api/leads/:id/push", async (req, res) => {
+  app.post("/api/leads/:id/push", asyncHandler(async (req, res) => {
     const { platform, campaignId } = req.body;
     const leadId = req.params.id;
 
@@ -339,7 +353,7 @@ async function startServer() {
       console.error("Push failed", e.response?.data || e.message);
       res.status(500).json({ error: e.response?.data || "Push failed" });
     }
-  });
+  }));
 
   // API Routes - Business Profile
   app.get("/api/business", (req, res) => {
@@ -437,6 +451,12 @@ async function startServer() {
     });
   }
 
+  // Global Error Handler
+  app.use((err: any, req: any, res: any, next: any) => {
+    console.error("Unhandled Error:", err);
+    res.status(500).json({ error: err.message || "Internal Server Error" });
+  });
+
   const server = app.listen(PORT, "0.0.0.0", () => {
     console.log(`Server running on http://0.0.0.0:${PORT}`);
   });
@@ -463,4 +483,7 @@ async function startServer() {
   });
 }
 
-startServer();
+startServer().catch(err => {
+  console.error("Failed to start server:", err);
+  process.exit(1);
+});

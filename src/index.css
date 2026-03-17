@@ -110,6 +110,11 @@
   50% { transform: translateY(-10px); }
 }
 
+@keyframes shimmer {
+  0% { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
 .animate-floating {
   animation: floating 4s ease-in-out infinite;
 }

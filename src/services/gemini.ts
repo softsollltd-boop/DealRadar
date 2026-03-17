@@ -6,15 +6,17 @@ class KeyManager {
   private currentIndex: number = 0;
 
   constructor() {
-    this.refreshKeys();
+    this.refreshKeys().catch(e => console.warn("Failed to refresh keys", e));
   }
 
   async refreshKeys() {
     try {
       const res = await fetch('/api/config');
+      if (!res.ok) throw new Error(`Failed to fetch config: ${res.status}`);
       const config: AppConfig = await res.json();
       this.keys = config.geminiApiKeys.length > 0 ? config.geminiApiKeys : [process.env.GEMINI_API_KEY || ""];
     } catch (e) {
+      console.warn("refreshKeys failed", e);
       this.keys = [process.env.GEMINI_API_KEY || ""];
     }
   }
@@ -157,6 +159,7 @@ export async function huntLeads(trigger: IntentTrigger, businessProfile: Busines
   
   CRITICAL INSTRUCTIONS:
   - NO HALLUCINATIONS: You must only return leads that you have actually found via the search tool. Do not make up names or companies.
+  - NO FAKE LINKS: If a verified LinkedIn URL is not found, return null. DO NOT provide placeholders like 'not found', 'N/A', or generic search links.
   - RECENCY IS PARAMOUNT: Only find leads where the trigger event happened in the LAST ${trigger.maxAgeDays} DAYS. If an event is from 2024 or 2025, it is STALE and must be REJECTED.
   - GOOGLE SEARCH GROUNDING: Use the search tool to find CURRENT information. Append "2026" or "recent" to your internal search queries. Search for specific news sites, press releases, and LinkedIn posts.
   - AUTHENTICITY: You must be able to cite a specific source (URL). If you cannot find a source, do not include the lead.
@@ -171,15 +174,15 @@ export async function huntLeads(trigger: IntentTrigger, businessProfile: Busines
   - company (The company name)
   - companyDomain (The company's primary website domain, e.g., "google.com")
   - location (The person's or company's location)
-  - linkedinUrl (The person's LinkedIn profile URL)
+  - linkedinUrl (The person's LinkedIn profile URL. Return null if not found.)
   - avatarUrl (A URL to the person's profile picture or company logo if found via search)
   - about (A brief summary of the person's professional background or current focus, max 3 sentences)
   - triggerEvent (Be extremely specific: what happened, when, and where. Include dates if possible)
   - personalizedHook (A high-impact, personalized opening line for an email or LinkedIn message. It must mention the specific trigger event and connect it to our offer in a non-salesy, value-first way. Max 2 sentences.)
-  - reasoning (Why this specific event makes them a perfect fit for our offer RIGHT NOW. Connect the trigger to our offer.)
+  - reasoning (Targeting Rationale: Why this specific event makes them a perfect fit for our offer RIGHT NOW. Connect the trigger to our offer.)
   - score (1-100, how well they fit the business profile)
   - confidenceScore (1-100, how certain you are this information is accurate and happened in the last ${trigger.maxAgeDays} days)
-  - sourceCitations (Array of URLs where you found this specific information)`;
+  - sourceCitations (Array of URLs where you found this specific information. These are the "Real Sources" of the intent trigger.)`;
 
   const prompt = systemPrompt || defaultPrompt;
 
@@ -202,9 +205,9 @@ export async function huntLeads(trigger: IntentTrigger, businessProfile: Busines
               company: { type: Type.STRING },
               companyDomain: { type: Type.STRING },
               location: { type: Type.STRING },
-              linkedinUrl: { type: Type.STRING },
-              avatarUrl: { type: Type.STRING },
-              about: { type: Type.STRING },
+              linkedinUrl: { type: Type.STRING, nullable: true },
+              avatarUrl: { type: Type.STRING, nullable: true },
+              about: { type: Type.STRING, nullable: true },
               triggerEvent: { type: Type.STRING },
               personalizedHook: { type: Type.STRING },
               reasoning: { type: Type.STRING },
@@ -212,7 +215,7 @@ export async function huntLeads(trigger: IntentTrigger, businessProfile: Busines
               confidenceScore: { type: Type.NUMBER },
               sourceCitations: { type: Type.ARRAY, items: { type: Type.STRING } },
             },
-            required: ["name", "title", "company", "companyDomain", "location", "linkedinUrl", "triggerEvent", "reasoning", "score", "confidenceScore", "sourceCitations"],
+            required: ["name", "title", "company", "companyDomain", "location", "triggerEvent", "reasoning", "score", "confidenceScore", "sourceCitations"],
           },
         },
       },
@@ -235,18 +238,20 @@ export async function findEmail(lead: { name: string; title: string; company: st
   // 1. Try Hunter.io if available
   try {
     const intRes = await fetch('/api/integrations');
+    if (!intRes.ok) throw new Error(`Integrations fetch failed: ${intRes.status}`);
     const integrations = await intRes.json();
     
     if (integrations.hunterApiKey && domain) {
       const hunterUrl = `https://api.hunter.io/v2/email-finder?domain=${domain}&first_name=${lead.name.split(' ')[0]}&last_name=${lead.name.split(' ').slice(1).join(' ')}&api_key=${integrations.hunterApiKey}`;
       const response = await fetch(hunterUrl);
+      if (!response.ok) throw new Error(`Hunter.io API failed: ${response.status}`);
       const data = await response.json();
       if (data.data && data.data.email) {
         return data.data.email;
       }
     }
   } catch (e) {
-    console.error("Hunter.io lookup failed", e);
+    console.warn("Hunter.io lookup failed", e);
   }
 
   // 2. Fallback to Gemini + Google Search

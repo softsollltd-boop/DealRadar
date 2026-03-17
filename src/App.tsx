@@ -12,6 +12,27 @@ import { analyzeBusiness, huntLeads, findEmail, generateDraft, generateDossier }
 import { HuntingRadar } from './components/HuntingRadar';
 import { LandingPage } from './components/LandingPage';
 import { OnboardingTour } from './components/OnboardingTour';
+import { PremiumLoader } from './components/PremiumLoader';
+import { ProgressBar } from './components/ProgressBar';
+import { SkeletonGrid } from './components/SkeletonCard';
+import { StatusToast, Toast } from './components/StatusToast';
+import { LeadStatusChart } from './components/LeadStatusChart';
+import { safeStringify } from './utils/serialization';
+
+// Helper for safe fetching with error handling
+async function safeFetch(url: string, options?: RequestInit) {
+  const res = await fetch(url, options);
+  if (!res.ok) {
+    let errorData;
+    try {
+      errorData = await res.json();
+    } catch (e) {
+      errorData = { error: res.statusText };
+    }
+    throw new Error(errorData.error || `Request failed with status ${res.status}`);
+  }
+  return res.json();
+}
 
 export default function App() {
   const [showLanding, setShowLanding] = useState(true);
@@ -36,12 +57,44 @@ export default function App() {
   const [currentDossier, setCurrentDossier] = useState<Dossier | null>(null);
   const [showDossierModal, setShowDossierModal] = useState(false);
   const [runTour, setRunTour] = useState(false);
+  const [toasts, setToasts] = useState<Toast[]>([]);
+
+  const addToast = (message: string, type: Toast['type'] = 'info') => {
+    const id = Math.random().toString(36).substring(2, 9);
+    setToasts(prev => [...prev, { id, message, type }]);
+    setTimeout(() => removeToast(id), 5000);
+  };
+
+  const removeToast = (id: string) => {
+    setToasts(prev => prev.filter(t => t.id !== id));
+  };
 
   useEffect(() => {
+    const handleUnhandledRejection = (event: PromiseRejectionEvent) => {
+      // Ignore Vite WebSocket errors which are benign in this environment
+      const reason = event.reason;
+      const message = reason?.message || (typeof reason === 'object' ? safeStringify(reason) : String(reason || ''));
+      
+      if (!message || message === '{}' || message.includes('WebSocket') || message.includes('vite') || message.includes('HMR') || message.includes('WebSocket closed')) {
+        event.preventDefault();
+        return;
+      }
+
+      console.warn('Unhandled promise rejection caught:', reason);
+      addToast(`An unexpected error occurred: ${message}`, 'error');
+      event.preventDefault();
+    };
+
+    window.addEventListener('unhandledrejection', handleUnhandledRejection);
+    
     const hasSeenTour = localStorage.getItem('dealradar-tour-seen');
     if (!showLanding && !hasSeenTour) {
       setRunTour(true);
     }
+
+    return () => {
+      window.removeEventListener('unhandledrejection', handleUnhandledRejection);
+    };
   }, [showLanding]);
 
   const handleTourFinish = () => {
@@ -54,8 +107,13 @@ export default function App() {
     setSelectedLeadForDossier(lead);
     try {
       // Check if we already have a dossier
-      const cachedRes = await fetch(`/api/dossiers/${lead.companyDomain}`);
-      const cachedData = await cachedRes.json();
+      let cachedData = null;
+      try {
+        cachedData = await safeFetch(`/api/dossiers/${lead.companyDomain}`);
+      } catch (e) {
+        // Ignore cache errors, just proceed to generate
+        console.warn("Cache lookup failed", e);
+      }
       
       if (cachedData) {
         setCurrentDossier(cachedData);
@@ -66,31 +124,40 @@ export default function App() {
       const dossier = await generateDossier(lead.company, lead.companyDomain || '');
       
       const dossierData = {
-        companyDomain: lead.companyDomain,
-        companyName: lead.company,
-        summary: dossier.summary,
-        keyExecutives: dossier.keyExecutives,
-        recentNews: dossier.recentNews,
-        financialPerformance: dossier.financialPerformance,
-        competitors: dossier.competitors,
-        techStack: dossier.techStack,
-        strategicPriorities: dossier.strategicPriorities,
-        painPoints: dossier.painPoints,
-        updatedAt: dossier.updatedAt
+        companyDomain: String(lead.companyDomain || ''),
+        companyName: String(lead.company || ''),
+        summary: String(dossier.summary || ''),
+        keyExecutives: Array.isArray(dossier.keyExecutives) ? dossier.keyExecutives.map(exec => ({
+          name: String(exec.name || ''),
+          role: String(exec.role || ''),
+          bio: String(exec.bio || '')
+        })) : [],
+        recentNews: Array.isArray(dossier.recentNews) ? dossier.recentNews.map(news => ({
+          date: String(news.date || ''),
+          title: String(news.title || ''),
+          impact: String(news.impact || ''),
+          url: String(news.url || '')
+        })) : [],
+        financialPerformance: String(dossier.financialPerformance || ''),
+        competitors: Array.isArray(dossier.competitors) ? dossier.competitors.map(String) : [],
+        techStack: Array.isArray(dossier.techStack) ? dossier.techStack.map(String) : [],
+        strategicPriorities: Array.isArray(dossier.strategicPriorities) ? dossier.strategicPriorities.map(String) : [],
+        painPoints: Array.isArray(dossier.painPoints) ? dossier.painPoints.map(String) : [],
+        updatedAt: String(dossier.updatedAt || '')
       };
       
       // Save to DB
-      await fetch('/api/dossiers', {
+      await safeFetch('/api/dossiers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(dossierData)
+        body: safeStringify(dossierData)
       });
 
       setCurrentDossier(dossier);
       setShowDossierModal(true);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert("Failed to generate dossier");
+      addToast(`Dossier generation failed: ${e.message}`, "error");
     } finally {
       setIsGeneratingDossier(false);
     }
@@ -100,8 +167,14 @@ export default function App() {
     setIsGeneratingDraft(true);
     setSelectedLeadForDraft(lead);
     try {
-      const res = await fetch('/api/business');
-      const bizData = await res.json();
+      const bizData = await safeFetch('/api/business');
+      
+      if (!bizData) {
+        addToast("Please complete your Business Profile first.", "info");
+        setActiveTab('business');
+        return;
+      }
+
       const biz = {
         id: bizData.id,
         companyName: bizData.company_name,
@@ -118,9 +191,9 @@ export default function App() {
       setCurrentDraft(result);
       setGeneratedDrafts(prev => ({ ...prev, [lead.id]: result }));
       setShowDraftModal(true);
-    } catch (e) {
+    } catch (e: any) {
       console.error(e);
-      alert("Failed to generate draft");
+      addToast(`Draft generation failed: ${e.message}`, "error");
     } finally {
       setIsGeneratingDraft(false);
     }
@@ -148,6 +221,11 @@ export default function App() {
   const [isAnalyzing, setIsAnalyzing] = useState(false);
   const [isHunting, setIsHunting] = useState<string | null>(null); // triggerId
   const [isLoading, setIsLoading] = useState(true);
+  const [isSavingBusiness, setIsSavingBusiness] = useState(false);
+  const [isSavingConfig, setIsSavingConfig] = useState(false);
+  const [isSavingIntegrations, setIsSavingIntegrations] = useState(false);
+  const [updatingLeads, setUpdatingLeads] = useState<Set<string>>(new Set());
+  const [deletingLeads, setDeletingLeads] = useState<Set<string>>(new Set());
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -157,16 +235,15 @@ export default function App() {
   const fetchInitialData = async () => {
     setIsLoading(true);
     try {
-      const [bizRes, trigRes, leadRes, confRes, intRes, campRes] = await Promise.all([
-        fetch('/api/business'),
-        fetch('/api/triggers'),
-        fetch('/api/leads'),
-        fetch('/api/config'),
-        fetch('/api/integrations'),
-        fetch('/api/integrations/campaigns')
+      const [bizData, trigs, lds, conf, ints, camps] = await Promise.all([
+        safeFetch('/api/business'),
+        safeFetch('/api/triggers'),
+        safeFetch('/api/leads'),
+        safeFetch('/api/config'),
+        safeFetch('/api/integrations'),
+        safeFetch('/api/integrations/campaigns')
       ]);
       
-      const bizData = await bizRes.json();
       const biz = bizData ? {
         id: bizData.id,
         companyName: bizData.company_name,
@@ -178,12 +255,6 @@ export default function App() {
         pricing: bizData.pricing,
         updatedAt: new Date(bizData.updated_at).getTime()
       } : null;
-      
-      const trigs = await trigRes.json();
-      const lds = await leadRes.json();
-      const conf = await confRes.json();
-      const ints = await intRes.json();
-      const camps = await campRes.json();
 
       setBusiness(biz);
       setTriggers(trigs);
@@ -221,7 +292,7 @@ export default function App() {
       
       if (!biz) setActiveTab('business');
     } catch (e) {
-      console.error("Failed to fetch data", e);
+      console.warn("Failed to fetch data", e);
     } finally {
       setIsLoading(false);
     }
@@ -229,27 +300,31 @@ export default function App() {
 
   const handleSaveBusiness = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setIsSavingBusiness(true);
     const formData = new FormData(e.currentTarget);
     const data = {
-      company_name: formData.get('company_name'),
-      industry: formData.get('industry'),
-      website_url: formData.get('website_url'),
-      offer: formData.get('offer'),
-      icp: formData.get('icp'),
-      product_service: formData.get('product_service'),
-      pricing: formData.get('pricing'),
+      company_name: String(formData.get('company_name') || ''),
+      industry: String(formData.get('industry') || ''),
+      website_url: String(formData.get('website_url') || ''),
+      offer: String(formData.get('offer') || ''),
+      icp: String(formData.get('icp') || ''),
+      product_service: String(formData.get('product_service') || ''),
+      pricing: String(formData.get('pricing') || ''),
     };
 
     try {
-      await fetch('/api/business', {
+      await safeFetch('/api/business', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(data)
+        body: safeStringify(data)
       });
-      fetchInitialData();
+      await fetchInitialData();
+      addToast("Business Profile Synchronized", "success");
       setActiveTab('dashboard');
-    } catch (e) {
-      setError("Failed to save business profile");
+    } catch (e: any) {
+      setError(`Failed to save business profile: ${e.message}`);
+    } finally {
+      setIsSavingBusiness(false);
     }
   };
 
@@ -261,25 +336,27 @@ export default function App() {
       const newTriggers = await analyzeBusiness(business, config.strategistSystemPrompt);
       const sortedTriggers = [...newTriggers].sort((a, b) => (a.rank || 0) - (b.rank || 0));
       const triggersPayload = sortedTriggers.map(t => ({
-        id: t.id,
-        title: t.title,
-        description: t.description,
-        reasoning: t.reasoning,
-        keywords: t.keywords,
-        priority: t.priority,
-        maxAgeDays: t.maxAgeDays,
-        rank: t.rank
+        id: String(t.id),
+        title: String(t.title),
+        description: String(t.description),
+        reasoning: String(t.reasoning),
+        keywords: Array.isArray(t.keywords) ? t.keywords.map(String) : [],
+        priority: String(t.priority),
+        maxAgeDays: Number(t.maxAgeDays || 30),
+        rank: Number(t.rank || 0)
       }));
 
-      await fetch('/api/triggers', {
+      await safeFetch('/api/triggers', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ triggers: triggersPayload })
+        body: safeStringify({ triggers: triggersPayload })
       });
       setTriggers(sortedTriggers);
+      addToast("Agent 1: Strategy Architecture Complete", "success");
       setActiveTab('triggers');
     } catch (e: any) {
-      setError(e.message || "Analysis failed");
+      setError(`Analysis failed: ${e.message}`);
+      console.warn("Analysis failed", e);
     } finally {
       setIsAnalyzing(false);
     }
@@ -289,8 +366,10 @@ export default function App() {
     if (!business) return;
     setIsHunting(trigger.id);
     setError(null);
+    addToast(`Agent 2: Deploying Sensors for "${trigger.title}"`, "info");
     try {
       const newLeads = await huntLeads(trigger, business, config.hunterSystemPrompt);
+      let foundCount = 0;
       for (const lead of newLeads) {
         // Automatically try to find email
         let email = lead.email;
@@ -308,38 +387,41 @@ export default function App() {
         }
 
         const leadPayload = {
-          id: lead.id,
-          name: lead.name,
-          title: lead.title,
-          company: lead.company,
-          location: lead.location,
-          email,
-          linkedin_url: lead.linkedinUrl,
-          avatar_url: lead.avatarUrl,
-          about: lead.about,
-          company_domain: lead.companyDomain,
-          trigger_event: lead.triggerEvent,
-          trigger_priority: lead.triggerPriority,
-          personalized_hook: lead.personalizedHook,
-          reasoning: lead.reasoning,
-          score: lead.score,
-          confidence_score: lead.confidenceScore,
-          source_citations: lead.sourceCitations || [],
+          id: String(lead.id),
+          name: String(lead.name),
+          title: String(lead.title),
+          company: String(lead.company),
+          location: String(lead.location),
+          email: email ? String(email) : null,
+          linkedin_url: String(lead.linkedinUrl),
+          avatar_url: lead.avatarUrl ? String(lead.avatarUrl) : null,
+          about: lead.about ? String(lead.about) : null,
+          company_domain: String(lead.companyDomain),
+          trigger_event: String(lead.triggerEvent),
+          trigger_priority: String(lead.triggerPriority),
+          personalized_hook: String(lead.personalizedHook),
+          reasoning: String(lead.reasoning),
+          score: Number(lead.score),
+          confidence_score: Number(lead.confidenceScore),
+          source_citations: Array.isArray(lead.sourceCitations) ? lead.sourceCitations.map(String) : [],
           status: 'new',
           notes: '',
-          priority_score: calculatePriorityScore({ ...lead, email })
+          priority_score: Number(calculatePriorityScore({ ...lead, email }))
         };
 
-        await fetch('/api/leads', {
+        await safeFetch('/api/leads', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(leadPayload)
+          body: safeStringify(leadPayload)
         });
+        foundCount++;
       }
-      fetchInitialData();
+      addToast(`Agent 2: Intercepted ${foundCount} High-Intent Opportunities`, "success");
+      await fetchInitialData();
       setActiveTab('dashboard');
     } catch (e: any) {
-      setError(e.message || "Hunting failed");
+      setError(`Hunting failed: ${e.message}`);
+      console.warn("Hunting failed", e);
     } finally {
       setIsHunting(null);
     }
@@ -347,50 +429,61 @@ export default function App() {
 
   const handleSaveConfig = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setIsSavingConfig(true);
     const formData = new FormData(e.currentTarget);
     const keys = (formData.get('keys') as string).split('\n').filter(k => k.trim());
     const newConfig = {
-      geminiApiKeys: keys,
-      strategistSystemPrompt: formData.get('strategist_prompt') as string,
-      hunterSystemPrompt: formData.get('hunter_prompt') as string,
+      geminiApiKeys: Array.isArray(keys) ? keys.map(String) : [],
+      strategistSystemPrompt: String(formData.get('strategist_prompt') || ''),
+      hunterSystemPrompt: String(formData.get('hunter_prompt') || ''),
     };
 
     try {
-      await fetch('/api/config', {
+      await safeFetch('/api/config', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newConfig)
+        body: safeStringify(newConfig)
       });
       setConfig(newConfig);
+      addToast("AI Configuration Updated", "success");
       setError(null);
-    } catch (e) {
-      setError("Failed to save config");
+    } catch (e: any) {
+      setError(`Failed to save config: ${e.message}`);
+      console.warn("Failed to save config", e);
+    } finally {
+      setIsSavingConfig(false);
     }
   };
 
   const handleSaveIntegrations = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
+    setIsSavingIntegrations(true);
     const formData = new FormData(e.currentTarget);
     const payload = {
-      smartleadApiKey: formData.get('smartlead_api_key') as string,
-      instantlyApiKey: formData.get('instantly_api_key') as string,
-      hunterApiKey: formData.get('hunter_api_key') as string,
+      smartleadApiKey: String(formData.get('smartlead_api_key') || ''),
+      instantlyApiKey: String(formData.get('instantly_api_key') || ''),
+      hunterApiKey: String(formData.get('hunter_api_key') || ''),
     };
 
     try {
-      await fetch('/api/integrations', {
+      await safeFetch('/api/integrations', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: safeStringify(payload)
       });
       setIntegrations(payload);
+      addToast("Delivery Systems Integrated", "success");
       setError(null);
-    } catch (e) {
-      setError("Failed to save integrations");
+    } catch (e: any) {
+      setError(`Failed to save integrations: ${e.message}`);
+      console.warn("Failed to save integrations", e);
+    } finally {
+      setIsSavingIntegrations(false);
     }
   };
 
   const handleUpdateLead = async (id: string, updates: Partial<AgentLead>) => {
+    setUpdatingLeads(prev => new Set(prev).add(id));
     try {
       const currentLead = leads.find(l => l.id === id);
       if (!currentLead) return;
@@ -400,31 +493,47 @@ export default function App() {
       
       // Manually pick fields to avoid any accidental circular refs from React/DOM
       const payload: any = {};
-      if (updates.status) payload.status = updates.status;
-      if (updates.notes !== undefined) payload.notes = updates.notes;
-      if (updates.email) payload.email = updates.email;
-      if (updates.triggerPriority) payload.trigger_priority = updates.triggerPriority;
-      payload.priority_score = newPriorityScore;
+      if (updates.status) payload.status = String(updates.status);
+      if (updates.notes !== undefined) payload.notes = updates.notes ? String(updates.notes) : null;
+      if (updates.email) payload.email = String(updates.email);
+      if (updates.triggerPriority) payload.trigger_priority = String(updates.triggerPriority);
+      payload.priority_score = Number(newPriorityScore);
 
-      await fetch(`/api/leads/${id}`, {
+      await safeFetch(`/api/leads/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: safeStringify(payload)
       });
       
       setLeads(prev => prev.map(l => l.id === id ? { ...l, ...updates, priorityScore: newPriorityScore } : l));
-    } catch (e) {
-      setError("Failed to update lead");
+    } catch (e: any) {
+      setError(`Failed to update lead: ${e.message}`);
+      console.warn("Failed to update lead", e);
+    } finally {
+      setUpdatingLeads(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
   const handleDeleteLead = async (id: string) => {
     if (!confirm("Are you sure you want to delete this lead?")) return;
+    setDeletingLeads(prev => new Set(prev).add(id));
     try {
-      await fetch(`/api/leads/${id}`, { method: 'DELETE' });
+      await safeFetch(`/api/leads/${id}`, { method: 'DELETE' });
       setLeads(prev => prev.filter(l => l.id !== id));
-    } catch (e) {
-      setError("Failed to delete lead");
+      addToast("Lead Removed from Pipeline", "info");
+    } catch (e: any) {
+      setError(`Failed to delete lead: ${e.message}`);
+      console.warn("Failed to delete lead", e);
+    } finally {
+      setDeletingLeads(prev => {
+        const next = new Set(prev);
+        next.delete(id);
+        return next;
+      });
     }
   };
 
@@ -455,11 +564,7 @@ export default function App() {
   };
 
   if (isLoading) {
-    return (
-      <div className="min-h-screen bg-bg flex items-center justify-center">
-        <Loader2 className="w-8 h-8 animate-spin text-accent" />
-      </div>
-    );
+    return <PremiumLoader type="initial" />;
   }
 
   if (showLanding) {
@@ -468,7 +573,10 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-bg selection:bg-accent/20 bg-grid">
-      <OnboardingTour run={runTour} onFinish={handleTourFinish} />
+      <AnimatePresence>
+        {isAnalyzing && <PremiumLoader type="analysis" message="Agent 1: Strategizing" />}
+      </AnimatePresence>
+      <OnboardingTour run={runTour} onFinish={handleTourFinish} setActiveTab={setActiveTab} />
 
       {/* Navigation */}
       <nav className="sticky top-0 z-50 glass px-6 py-4 transition-all duration-500">
@@ -592,6 +700,35 @@ export default function App() {
                 </div>
               </div>
 
+              {leads.length > 0 && (
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                  <div className="lg:col-span-1 glass-card p-8 flex flex-col items-center justify-center">
+                    <h3 className="text-[10px] font-black uppercase tracking-[0.2em] text-slate-400 mb-6 w-full text-left">Pipeline Distribution</h3>
+                    <div className="w-full h-[240px]">
+                      <LeadStatusChart leads={leads} />
+                    </div>
+                  </div>
+                  <div className="lg:col-span-2 glass-card p-8 grid grid-cols-2 sm:grid-cols-4 gap-4">
+                    <div className="flex flex-col justify-center p-6 bg-slate-50 rounded-3xl border border-line">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-slate-400 mb-2">Total Leads</span>
+                      <span className="text-3xl font-display font-black text-ink">{leads.length}</span>
+                    </div>
+                    <div className="flex flex-col justify-center p-6 bg-blue-50/50 rounded-3xl border border-blue-100">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-blue-400 mb-2">Contacted</span>
+                      <span className="text-3xl font-display font-black text-blue-600">{leads.filter(l => l.status === 'contacted').length}</span>
+                    </div>
+                    <div className="flex flex-col justify-center p-6 bg-violet-50/50 rounded-3xl border border-violet-100">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-violet-400 mb-2">Replied</span>
+                      <span className="text-3xl font-display font-black text-violet-600">{leads.filter(l => l.status === 'replied').length}</span>
+                    </div>
+                    <div className="flex flex-col justify-center p-6 bg-emerald-50/50 rounded-3xl border border-emerald-100">
+                      <span className="text-[9px] font-black uppercase tracking-widest text-emerald-400 mb-2">Booked</span>
+                      <span className="text-3xl font-display font-black text-emerald-600">{leads.filter(l => l.status === 'booked').length}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
+
               <div id="tour-filters" className="flex flex-col lg:flex-row gap-6 items-stretch lg:items-center justify-between bg-white/40 backdrop-blur-md p-6 rounded-[2rem] border border-line shadow-sm">
                 <div className="relative w-full lg:w-[540px]">
                   <Search className="absolute left-6 top-1/2 -translate-y-1/2 w-5 h-5 text-slate-400" />
@@ -638,6 +775,7 @@ export default function App() {
               </div>
 
               <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-8">
+                {isHunting && <SkeletonGrid count={3} />}
                 {leads
                   .filter(l => {
                     const matchesStatus = filterStatus === 'all' || l.status === filterStatus;
@@ -672,6 +810,9 @@ export default function App() {
                         campaigns={campaigns}
                         onUpdate={(updates) => handleUpdateLead(lead.id, updates)}
                         onDelete={() => handleDeleteLead(lead.id)}
+                        addToast={addToast}
+                        isUpdating={updatingLeads.has(lead.id)}
+                        isDeleting={deletingLeads.has(lead.id)}
                         onGenerateDraft={() => handleGenerateDraft(lead)}
                         isGeneratingDraft={isGeneratingDraft && selectedLeadForDraft?.id === lead.id}
                         onGenerateDossier={() => handleGenerateDossier(lead)}
@@ -684,7 +825,7 @@ export default function App() {
                       />
                     ))
                 ) : (
-                  <div className="col-span-full py-32 text-center bg-slate-50 rounded-[40px] border border-dashed border-slate-200">
+                  <div id="tour-lead-card" className="col-span-full py-32 text-center bg-slate-50 rounded-[40px] border border-dashed border-slate-200">
                     <div className="w-16 h-16 bg-white rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
                       <Search className="text-slate-300 w-8 h-8" />
                     </div>
@@ -715,7 +856,8 @@ export default function App() {
                 <Input label="Pricing Model" name="pricing" defaultValue={business?.pricing} placeholder="e.g. $5k/mo or $50k project" icon={<DollarSign className="w-4 h-4" />} />
                 
                 <div className="pt-6 flex flex-col sm:flex-row items-center gap-4">
-                  <button type="submit" className="w-full btn-secondary !py-4">
+                  <button type="submit" disabled={isSavingBusiness} className="w-full btn-secondary !py-4 flex items-center justify-center gap-2">
+                    {isSavingBusiness ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                     Save Profile
                   </button>
                   {business && (
@@ -856,7 +998,8 @@ export default function App() {
                     <TextArea label="Agent 1: Strategist Prompt" name="strategist_prompt" defaultValue={config.strategistSystemPrompt} placeholder="Custom instructions for strategic analysis..." />
                     <TextArea label="Agent 2: Hunter Prompt" name="hunter_prompt" defaultValue={config.hunterSystemPrompt} placeholder="Custom instructions for lead discovery..." />
 
-                    <button type="submit" className="w-full btn-primary">
+                    <button type="submit" disabled={isSavingConfig} className="w-full btn-primary flex items-center justify-center gap-2">
+                      {isSavingConfig ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                       Save Configuration
                     </button>
                   </form>
@@ -928,7 +1071,8 @@ export default function App() {
                     </div>
                   </div>
 
-                  <button type="submit" className="w-full btn-primary">
+                  <button type="submit" disabled={isSavingIntegrations} className="w-full btn-primary flex items-center justify-center gap-2">
+                    {isSavingIntegrations ? <Loader2 className="w-5 h-5 animate-spin" /> : null}
                     Save Integrations
                   </button>
                 </form>
@@ -1021,9 +1165,13 @@ export default function App() {
                             </div>
                             <div className="flex items-center gap-2">
                               <button 
-                                onClick={() => {
-                                  navigator.clipboard.writeText(`Subject: ${d.subject}\n\n${d.body}`);
-                                  alert("Draft copied to clipboard!");
+                                onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(`Subject: ${d.subject}\n\n${d.body}`);
+                                    alert("Draft copied to clipboard!");
+                                  } catch (err) {
+                                    console.error("Failed to copy text: ", err);
+                                  }
                                 }}
                                 className="p-2 hover:bg-accent/10 text-slate-400 hover:text-accent rounded-lg transition-all"
                                 title="Copy to Clipboard"
@@ -1220,6 +1368,7 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+      <StatusToast toasts={toasts} onRemove={removeToast} />
     </div>
   );
 }
@@ -1284,16 +1433,19 @@ function TextArea({ label, name, placeholder, defaultValue }: { label: string, n
 const LeadCard: React.FC<{ 
   lead: AgentLead, 
   campaigns: Campaign[],
-  onUpdate: (updates: Partial<AgentLead>) => void,
-  onDelete: () => void,
+  onUpdate: (updates: Partial<AgentLead>) => Promise<void>,
+  onDelete: () => Promise<void>,
+  addToast: (message: string, type?: 'success' | 'info' | 'error') => void,
   onGenerateDraft: () => void,
   isGeneratingDraft: boolean,
   onGenerateDossier: () => void,
   isGeneratingDossier: boolean,
+  isUpdating?: boolean,
+  isDeleting?: boolean,
   hasDraft?: boolean,
   onViewDraft?: () => void,
   id?: string
-}> = ({ lead, campaigns, onUpdate, onDelete, onGenerateDraft, isGeneratingDraft, onGenerateDossier, isGeneratingDossier, hasDraft, onViewDraft, id }) => {
+}> = ({ lead, campaigns, onUpdate, onDelete, addToast, onGenerateDraft, isGeneratingDraft, onGenerateDossier, isGeneratingDossier, isUpdating, isDeleting, hasDraft, onViewDraft, id }) => {
   const [isFindingEmail, setIsFindingEmail] = useState(false);
   const [isPushing, setIsPushing] = useState(false);
   const [showPushMenu, setShowPushMenu] = useState(false);
@@ -1307,10 +1459,11 @@ const LeadCard: React.FC<{
       const found = await findEmail(lead);
       if (found) {
         setEmail(found);
-        onUpdate({ email: found });
+        await onUpdate({ email: found });
       }
-    } catch (e) {
-      console.error(e);
+    } catch (e: any) {
+      console.warn("Failed to find email:", e);
+      // We don't want to show a toast here as it might be a common failure
     } finally {
       setIsFindingEmail(false);
     }
@@ -1324,24 +1477,19 @@ const LeadCard: React.FC<{
     setIsPushing(true);
     try {
       const pushPayload = { 
-        platform: campaign.platform, 
-        campaignId: campaign.id 
+        platform: String(campaign.platform), 
+        campaignId: String(campaign.id) 
       };
-      const res = await fetch(`/api/leads/${lead.id}/push`, {
+      await safeFetch(`/api/leads/${lead.id}/push`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(pushPayload)
+        body: safeStringify(pushPayload)
       });
-      if (res.ok) {
-        onUpdate({ status: 'contacted' });
-        setShowPushMenu(false);
-      } else {
-        const err = await res.json();
-        alert(`Push failed: ${err.error || 'Unknown error'}`);
-      }
-    } catch (e) {
-      console.error(e);
-      alert("Push failed due to a network error.");
+      await onUpdate({ status: 'contacted' });
+      setShowPushMenu(false);
+    } catch (e: any) {
+      console.warn("Push failed:", e);
+      addToast(`Deployment failed: ${e.message}`, "error");
     } finally {
       setIsPushing(false);
     }
@@ -1372,8 +1520,13 @@ const LeadCard: React.FC<{
       initial={{ opacity: 0, y: 20 }}
       animate={{ opacity: 1, y: 0 }}
       whileHover={{ y: -8 }}
-      className="glass-card overflow-hidden flex flex-col h-full group border-line hover:border-accent/30 transition-all duration-500"
+      className={`glass-card overflow-hidden flex flex-col h-full group border-line hover:border-accent/30 transition-all duration-500 ${isDeleting ? 'opacity-50 grayscale' : ''} ${isUpdating ? 'border-accent/50' : ''}`}
     >
+      {isUpdating && (
+        <div className="absolute inset-0 z-50 bg-white/40 backdrop-blur-[1px] flex items-center justify-center">
+          <Loader2 className="w-8 h-8 text-accent animate-spin" />
+        </div>
+      )}
       {/* Card Header with Background & Quick Actions */}
       <div className="relative h-28 bg-slate-50 overflow-hidden border-b border-line">
         <div className="absolute inset-0 opacity-[0.03] bg-grid" />
@@ -1391,7 +1544,19 @@ const LeadCard: React.FC<{
 
         {/* Status Badge - Floating Top Left */}
         <div className="absolute top-4 left-4 z-10">
-          <div className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-widest shadow-sm backdrop-blur-md ${status.color}`}>
+          <div 
+            onClick={async () => {
+              const statuses: AgentLead['status'][] = ['new', 'contacted', 'replied', 'booked', 'rejected'];
+              const currentIndex = statuses.indexOf(lead.status);
+              const nextStatus = statuses[(currentIndex + 1) % statuses.length];
+              try {
+                await onUpdate({ status: nextStatus });
+              } catch (e) {
+                console.error("Failed to update status:", e);
+              }
+            }}
+            className={`flex items-center gap-2 px-3 py-1.5 rounded-full border text-[10px] font-black uppercase tracking-widest shadow-sm backdrop-blur-md cursor-pointer ${status.color}`}
+          >
             <div className={`w-1.5 h-1.5 rounded-full ${status.dot} animate-pulse`} />
             {status.label}
           </div>
@@ -1437,9 +1602,11 @@ const LeadCard: React.FC<{
         <div className="mb-8">
           <div className="flex items-center gap-2 mb-2">
             <h3 className="text-2xl font-display font-black tracking-tighter text-ink truncate leading-none">{lead.name}</h3>
-            <a href={lead.linkedinUrl} target="_blank" rel="noreferrer" className="text-slate-300 hover:text-accent transition-colors p-1">
-              <Linkedin className="w-4 h-4" />
-            </a>
+            {lead.linkedinUrl && (
+              <a href={lead.linkedinUrl} target="_blank" rel="noreferrer" className="text-slate-300 hover:text-accent transition-colors p-1">
+                <Linkedin className="w-4 h-4" />
+              </a>
+            )}
           </div>
           <p className="text-xs font-black text-accent uppercase tracking-[0.15em] mb-4">{lead.title}</p>
           
@@ -1488,6 +1655,36 @@ const LeadCard: React.FC<{
                 "{lead.personalizedHook}"
               </p>
             </div>
+
+            <div className="group/item">
+              <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2 mb-3">
+                <Brain className="w-3 h-3 text-accent" /> Targeting Rationale
+              </span>
+              <p className="text-xs font-bold text-ink leading-relaxed pl-5 border-l-2 border-accent/10 group-hover/item:border-accent transition-colors">
+                {lead.reasoning}
+              </p>
+            </div>
+
+            {lead.sourceCitations && lead.sourceCitations.length > 0 && (
+              <div className="group/item">
+                <span className="text-[9px] font-black uppercase tracking-[0.2em] text-slate-400 flex items-center gap-2 mb-3">
+                  <ExternalLink className="w-3 h-3 text-accent" /> Source Verification
+                </span>
+                <div className="flex flex-wrap gap-2 pl-5">
+                  {lead.sourceCitations.map((url, i) => (
+                    <a 
+                      key={i} 
+                      href={url} 
+                      target="_blank" 
+                      rel="noreferrer"
+                      className="text-[10px] font-bold text-accent hover:underline truncate max-w-[200px]"
+                    >
+                      {new URL(url).hostname}
+                    </a>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Primary Intelligence Actions */}
@@ -1519,8 +1716,14 @@ const LeadCard: React.FC<{
             <div className="flex items-center justify-between">
               <span className="text-[9px] font-black uppercase tracking-widest text-slate-400">Strategic Notes</span>
               <button 
-                onClick={() => {
-                  if (isEditingNotes) onUpdate({ notes });
+                onClick={async () => {
+                  if (isEditingNotes) {
+                    try {
+                      await onUpdate({ notes });
+                    } catch (e) {
+                      console.error("Failed to save notes:", e);
+                    }
+                  }
                   setIsEditingNotes(!isEditingNotes);
                 }}
                 className="text-[9px] font-black uppercase tracking-widest text-accent hover:text-accent-secondary transition-colors"
@@ -1552,9 +1755,13 @@ const LeadCard: React.FC<{
                   <Mail className="w-3.5 h-3.5 text-slate-300" />
                   <span className="text-[10px] font-mono font-bold text-ink truncate">{email}</span>
                 </div>
-                <button onClick={() => {
-                  navigator.clipboard.writeText(email);
-                  alert("Email copied!");
+                <button onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(email);
+                    alert("Email copied!");
+                  } catch (err) {
+                    console.error("Failed to copy email: ", err);
+                  }
                 }} className="text-[9px] font-black text-accent hover:text-accent-secondary transition-colors ml-2">COPY</button>
               </div>
             ) : (
@@ -1573,7 +1780,7 @@ const LeadCard: React.FC<{
             <button 
               onClick={() => setShowPushMenu(!showPushMenu)}
               disabled={isPushing || lead.status === 'contacted'}
-              className={`w-full h-14 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all shadow-xl ${
+              className={`w-full h-14 rounded-2xl font-black text-[11px] uppercase tracking-[0.2em] flex items-center justify-center gap-3 transition-all shadow-xl disabled:opacity-50 ${
                 lead.status === 'contacted' 
                   ? 'bg-slate-100 text-slate-400 cursor-default shadow-none' 
                   : 'bg-ink text-white hover:bg-accent shadow-accent/10 hover:shadow-accent/20'
@@ -1601,7 +1808,8 @@ const LeadCard: React.FC<{
                         <button
                           key={`${camp.platform}-${camp.id}`}
                           onClick={() => handlePush(camp)}
-                          className="w-full text-left px-6 py-4 hover:bg-slate-50 transition-all flex items-center justify-between group border-b border-slate-100 last:border-0"
+                          disabled={isPushing}
+                          className="w-full text-left px-6 py-4 hover:bg-slate-50 transition-all flex items-center justify-between group border-b border-slate-100 last:border-0 disabled:opacity-50"
                         >
                           <div className="flex flex-col">
                             <span className="text-sm font-bold text-slate-900 group-hover:text-accent transition-colors">{camp.name}</span>

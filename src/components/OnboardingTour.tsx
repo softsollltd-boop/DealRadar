@@ -4,9 +4,10 @@ import Joyride, { Step, CallBackProps, STATUS } from 'react-joyride';
 interface OnboardingTourProps {
   run: boolean;
   onFinish: () => void;
+  setActiveTab: (tab: 'dashboard' | 'business' | 'triggers' | 'settings') => void;
 }
 
-export const OnboardingTour: React.FC<OnboardingTourProps> = ({ run, onFinish }) => {
+export const OnboardingTour: React.FC<OnboardingTourProps> = ({ run, onFinish, setActiveTab }) => {
   const steps: Step[] = [
     {
       target: 'body',
@@ -37,20 +38,20 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ run, onFinish })
       ),
     },
     {
-      target: '#tour-launch-hunter',
+      target: '#tour-dashboard',
       content: (
         <div className="text-left">
-          <h3 className="text-base font-bold mb-1">3. Deploy Agent 2</h3>
-          <p className="text-xs text-slate-600">Click "Launch Hunter" to send Agent 2 into the wild to find specific leads matching your intent triggers.</p>
+          <h3 className="text-base font-bold mb-1">3. Your Pipeline</h3>
+          <p className="text-xs text-slate-600">All discovered leads flow back here. Monitor, filter, and manage your high-value opportunities.</p>
         </div>
       ),
     },
     {
-      target: '#tour-dashboard',
+      target: '#tour-launch-hunter',
       content: (
         <div className="text-left">
-          <h3 className="text-base font-bold mb-1">4. Your Pipeline</h3>
-          <p className="text-xs text-slate-600">All discovered leads flow back here. Monitor, filter, and manage your high-value opportunities.</p>
+          <h3 className="text-base font-bold mb-1">4. Deploy Agent 2</h3>
+          <p className="text-xs text-slate-600">Click "Launch Hunter" to send Agent 2 into the wild to find specific leads matching your intent triggers.</p>
         </div>
       ),
     },
@@ -75,7 +76,18 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ run, onFinish })
   ];
 
   const handleJoyrideCallback = (data: CallBackProps) => {
-    const { status } = data;
+    const { status, index, type } = data;
+    
+    if (type === 'step:after') {
+      // Defer state updates to avoid Joyride internal state conflicts during re-render
+      setTimeout(() => {
+        if (index === 1) setActiveTab('business');
+        if (index === 2) setActiveTab('triggers');
+        if (index === 3) setActiveTab('dashboard');
+        if (index === 5) setActiveTab('settings');
+      }, 0);
+    }
+
     if (status === STATUS.FINISHED || status === STATUS.SKIPPED) {
       onFinish();
     }
@@ -88,6 +100,10 @@ export const OnboardingTour: React.FC<OnboardingTourProps> = ({ run, onFinish })
       continuous
       showProgress
       showSkipButton
+      debug={false}
+      disableScrolling={true}
+      disableScrollParentFix={true}
+      spotlightClicks={true}
       callback={handleJoyrideCallback}
       styles={{
         options: {

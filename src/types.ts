@@ -28,7 +28,7 @@ export interface AgentLead {
   company: string;
   companyDomain?: string;
   location: string;
-  linkedinUrl: string;
+  linkedinUrl?: string;
   avatarUrl?: string;
   about?: string;
   email?: string;
